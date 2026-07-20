@@ -34,11 +34,15 @@ if [[ "$what" == "all" || "$what" == "spec" ]]; then
     # timeout: the prompt-loop tests read from typeahead; a bug that leaves
     # getcharstr() waiting would otherwise hang forever.
     # one nvim per spec: the last-pattern state is process-global
+    # -l, not -c "luafile": measured, under luafile a Vim error raised inside
+    # vim.fn.* (E348 from expand("<cword>") on a blank line, say) does not
+    # surface as a Lua error -- the call just returns "" and the suite cannot
+    # see it. Under -l it propagates and the test fails. The sibling repos in
+    # this stack all use -l for the same reason.
     for spec in "$repo"/tests/spec*.lua; do
         timeout 60 nvim --headless --clean \
-            -c "set rtp+=$repo" \
-            -c "luafile $spec" \
-            -c "qa" 2>&1 || rc=1
+            --cmd "set rtp+=$repo" \
+            -l "$spec" 2>&1 || rc=1
     done
 fi
 
