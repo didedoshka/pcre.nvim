@@ -586,6 +586,43 @@ t("s-rewrite: :su stays native (the escape hatch)", function()
     eq(lines_of(b), { "n-n" })
 end)
 
+-- toggle -----------------------------------------------------------------------
+-- Vim-only atoms (\zs, \ze) are the proof that the native command ran: they are
+-- errors to PCRE2. Last section on purpose -- the flag is process-global.
+
+t("toggle: off hands / back to native", function()
+    local b = show({ "n.n" })
+    -- typed, not ps.toggle(): proves :Pcre reaches it and that the :s rewrite
+    -- keeps its hands off a command starting with anything but a range
+    vim.fn.feedkeys(":Pcre\r", "tx")
+    assert(not ps.enabled(), "still enabled after :Pcre")
+    ps.search()
+    type_keys([[n\zs.\zen<CR>]])
+    vim.api.nvim_feedkeys("", "x", false) -- flush the typeahead
+    eq(cursor(), { 1, 1 })
+    eq(lines_of(b), { "n.n" })
+end)
+
+t("toggle: off leaves a typed :s native, :S still pcre", function()
+    local b = show({ "n.n" })
+    vim.fn.feedkeys([[:s/n\zs.\zen/-/]] .. "\r", "tx")
+    eq(lines_of(b), { "n-n" })
+    local b2 = show({ "foo" })
+    vim.fn.feedkeys(":S/fo(?=o)/x/\r", "tx")
+    eq(lines_of(b2), { "xo" })
+end)
+
+t("toggle: back on restores / and the :s rewrite", function()
+    vim.fn.feedkeys(":Pcre\r", "tx")
+    assert(ps.enabled(), "still disabled after the second :Pcre")
+    local b = show({ "foo foo" })
+    type_keys("fo(?=o)<CR>")
+    ps.search()
+    eq(cursor(), { 1, 4 })
+    vim.fn.feedkeys(":s/fo(?=o)/x/g\r", "tx")
+    eq(lines_of(b), { "xo xo" })
+end)
+
 if failed > 0 then
     print(("%d test(s) FAILED"):format(failed))
     vim.cmd("cq")

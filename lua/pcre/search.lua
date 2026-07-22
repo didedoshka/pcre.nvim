@@ -98,6 +98,14 @@ function M.clear()
     end
 end
 
+---Drop the pcre search entirely, not just its highlights: with no last pattern
+---n/N fall through to native. `:noh` must not do this -- native n re-highlights
+---after :noh -- so it is separate from clear().
+function M.forget()
+    last = nil
+    M.clear()
+end
+
 ---Our last pattern, or nil once a native search (*, #, gd, ...) has taken @/
 ---over -- then it owns n/N, and its hlsearch highlights are on screen instead.
 local function pcre_last()

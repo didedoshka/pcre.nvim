@@ -8,9 +8,9 @@ Requires Neovim >= 0.10 and `rg` (ripgrep) built with PCRE2 on `$PATH`.
 
 ## Install
 
-Nothing is remapped by default: `setup()` registers the `:S` command and a hook
-that makes `:noh` clear search highlights. Taking over `/`, `n`, `N`, and `:s`
-is your explicit choice:
+Nothing is remapped by default: `setup()` registers the `:S` and `:Pcre`
+commands and a hook that makes `:noh` clear search highlights. Taking over `/`,
+`n`, `N`, and `:s` is your explicit choice:
 
 ```lua
 -- lazy.nvim
@@ -24,6 +24,7 @@ is your explicit choice:
         vim.keymap.set("n", "/", ps.search)
         vim.keymap.set("n", "n", ps.next)
         vim.keymap.set("n", "N", ps.prev)
+        vim.keymap.set("n", "<leader>p", ps.toggle)
     end,
 }
 ```
@@ -82,6 +83,17 @@ expands to `:S/` as you type. (Not a real `cnoreabbrev`: vim abbreviations
 never fire after a range — `:s/` expands but `:%s/` doesn't — so the rewrite
 runs on `CmdlineChanged` when the separator is typed.) Native `:s` stays
 reachable as `:su`, and a bare `:s<CR>` (no separator) is still native too.
+
+## Toggle
+
+`:Pcre` (or `toggle()`) turns pcre off and back on — it echoes `pcre off` /
+`pcre on` — so the
+same pattern can be run through Vim's own engine without editing the config —
+handy for seeing exactly where the two engines differ. While off, `/` opens the
+native prompt, `n`/`N` are native, and a typed `:s` is not rewritten; `:S` keeps
+substituting with PCRE2, so the two are comparable side by side. Toggling off
+also drops the live pcre search and its highlights. `enabled()` reports the
+state, for a statusline.
 
 ## Not covered (by design or not yet)
 

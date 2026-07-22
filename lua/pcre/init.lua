@@ -1,18 +1,48 @@
 -- pcre.nvim -- "/" search and ":s" substitute with PCRE2, matched by
 -- ripgrep instead of vim's regex engine.
 --
--- Deliberately non-invasive: setup() only registers the :S command and the
--- :noh hook. Searching is functions you map yourself, and the :s -> :S
+-- Deliberately non-invasive: setup() only registers the :S and :Pcre commands
+-- and the :noh hook. Searching is functions you map yourself, and the :s -> :S
 -- cmdline abbreviation is opt-in.
 local M = {}
 
 local search = require("pcre.search")
 local substitute = require("pcre.substitute")
 
-M.search = search.search
 M.next = search.next
 M.prev = search.prev
 M.clear = search.clear
+
+local enabled = true
+
+---Whether pcre currently owns "/" and a typed ":s" (for a statusline).
+function M.enabled()
+    return enabled
+end
+
+---Turn pcre off and back on (also :Pcre), to run the same pattern through vim's
+---own regex engine without editing the config. While off, "/" and a typed ":s"
+---are the native ones; ":S" still substitutes with PCRE2, so the two are
+---comparable side by side.
+function M.toggle()
+    enabled = not enabled
+    -- n/N need no check of their own: with the pcre search forgotten they
+    -- already fall through to native.
+    if not enabled then
+        search.forget()
+    end
+    vim.api.nvim_echo({ { "pcre " .. (enabled and "on" or "off") } }, false, {})
+end
+
+---The "/" mapping.
+function M.search()
+    if not enabled then
+        -- "n": the "/" mapping itself must not fire again
+        vim.api.nvim_feedkeys("/", "n", false)
+        return
+    end
+    search.search()
+end
 
 ---@class pcre.Opts
 ---@field substitute_abbrev? boolean expand a typed :s (with any range) into :S
@@ -26,6 +56,10 @@ function M.setup(opts)
         range = true,
         preview = substitute.preview,
         desc = "PCRE2 substitute (rg --pcre2)",
+    })
+
+    vim.api.nvim_create_user_command("Pcre", M.toggle, {
+        desc = "toggle pcre off/on (native / and :s while off)",
     })
 
     -- :noh must clear our highlights too or the search won't feel native;
@@ -53,7 +87,7 @@ function M.setup(opts)
         vim.api.nvim_create_autocmd("CmdlineChanged", {
             group = vim.api.nvim_create_augroup("pcre.abbrev", {}),
             callback = function()
-                if vim.fn.getcmdtype() ~= ":" then
+                if not enabled or vim.fn.getcmdtype() ~= ":" then
                     return
                 end
                 local line = vim.fn.getcmdline()
