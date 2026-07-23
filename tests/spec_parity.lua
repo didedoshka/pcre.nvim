@@ -173,6 +173,11 @@ t("accepting echoes /pattern with a right-aligned [cur/total]", function()
     local last = seen[#seen]
     local pat, count = last:match("^(/foo)%s+(%[2/5%])$")
     assert(pat and count, "unexpected echo: " .. vim.inspect(last))
+    -- while typing the echo is the bare pattern: native shows the count only
+    -- once the search is accepted
+    for i = 1, #seen - 1 do
+        assert(not seen[i]:find("[", 1, true), "count echoed while typing: " .. seen[i])
+    end
     -- right-aligned, but clear of the 'showcmd' cells: a message reaching into
     -- them triggers a hit-enter prompt (measured on 0.13-dev)
     eq(#last, vim.o.columns - (vim.o.showcmd and 12 or 1))

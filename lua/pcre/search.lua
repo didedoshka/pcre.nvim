@@ -225,7 +225,9 @@ function M.search()
         -- no rendered caret here: the live jump above already puts the real
         -- cursor on the current match, a second one in the echo area would
         -- be a duplicate ("Cursor" chunk here previously caused exactly that)
-        echo_search(pattern, cur, pattern ~= "" and #matches or nil)
+        -- no count either -- native shows [cur/total] only once the search is
+        -- accepted, never while typing
+        echo_search(pattern)
     end
 
     ---@param keep_live boolean put the pre-prompt highlights back (plain

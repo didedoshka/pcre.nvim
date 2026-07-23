@@ -41,7 +41,7 @@ Prefer less invasive? Skip the abbreviation and map `<leader>/` instead of `/`.
 incremental highlighting and view scrolling while you type when 'incsearch' is
 on (with 'noincsearch' nothing moves or highlights until `<CR>`),
 matches highlighted with `Search`/`CurSearch`, a right-aligned `[cur/total]`
-match count, jumplist entries, `'wrapscan'` and `'hlsearch'` respected, shared
+match count once accepted (never while typing, like native), jumplist entries, `'wrapscan'` and `'hlsearch'` respected, shared
 native search history, `:noh` to clear. Highlights are drawn in the same stage
 as native hlsearch, so they layer exactly like it — over a sign's line
 background, under a visual selection. A terminal paste while the prompt is open
