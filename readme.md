@@ -48,7 +48,8 @@ background, under a visual selection. A terminal paste while the prompt is open
 lands in the pattern (newlines flatten to spaces).
 
 Inside the prompt: `<CR>` accept (empty pattern repeats the last search),
-`<Esc>`/`<C-c>` cancel, `<Left>`/`<Right>` move the cursor, `<BS>`, `<C-u>`
+`<Esc>`/`<C-c>` cancel, `<Left>`/`<Right>` move the cursor (shown as a
+`Cursor` cell while mid-pattern), `<BS>`, `<C-u>`
 clear to start, `<C-w>` delete word, `<C-r>{reg}` insert register
 (`<C-r><C-w>` word under cursor, `<C-r><C-a>` WORD), `<Up>`/`<Down>`/`<C-p>`/
 `<C-n>` history.

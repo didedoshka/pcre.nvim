@@ -193,6 +193,43 @@ t("search: <Right> moves the cursor back toward the end", function()
     eq(cursor(), { 1, 0 })
 end)
 
+-- capture nvim_echo chunks while driving the prompt, to check the rendered
+-- caret; the real nvim_echo still runs, so the code path stays the same
+local function echo_calls(fn)
+    local calls = {}
+    local real = vim.api.nvim_echo
+    vim.api.nvim_echo = function(chunks, history, opts)
+        calls[#calls + 1] = vim.deepcopy(chunks)
+        return real(chunks, history, opts)
+    end
+    local ok, err = pcall(fn)
+    vim.api.nvim_echo = real
+    assert(ok, err)
+    return calls
+end
+
+t("search: <Left> renders a Cursor cell at the edit position", function()
+    show({ "abc" }, { 1, 0 })
+    type_keys("abc<Left><Left><Esc>")
+    local calls = echo_calls(ps.search)
+    -- the last call is the cancel's echo({}); before it, the prompt after <Left><Left>
+    eq(calls[#calls - 1], { { "/a" }, { "b", "Cursor" }, { "c" } })
+end)
+
+t("search: no Cursor cell with the caret at the end of the pattern", function()
+    show({ "abc" }, { 1, 0 })
+    type_keys("abc<Esc>")
+    local calls = echo_calls(ps.search)
+    eq(calls[#calls - 1], { { "/abc" } })
+end)
+
+t("search: <Right> back to the end drops the Cursor cell again", function()
+    show({ "abc" }, { 1, 0 })
+    type_keys("abc<Left><Right><Esc>")
+    local calls = echo_calls(ps.search)
+    eq(calls[#calls - 1], { { "/abc" } })
+end)
+
 t("search: <C-u> after <Left> clears only up to the cursor", function()
     show({ "cd" }, { 1, 0 })
     type_keys("abcd<Left><Left><C-u><CR>") -- cursor between b and c, clear "ab", keep "cd"

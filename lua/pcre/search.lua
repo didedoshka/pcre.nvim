@@ -157,10 +157,23 @@ end
 
 ---The native search echo: "/pat", and a right-aligned [cur/total] like
 ---'shortmess' without S shows. total == nil leaves the count out.
-local function echo_search(pattern, cur, total)
+---cpos (a character index) renders the edit position as a Cursor cell, but
+---only mid-pattern: at the end there is no cell under the caret, and the real
+---cursor already sits on the current match -- a rendered one there would be a
+---duplicate ("Cursor" chunk at the end previously caused exactly that).
+local function echo_search(pattern, cur, total, cpos)
     local text = "/" .. pattern
+    local chunks = { { text } }
+    if cpos and cpos < vim.fn.strchars(pattern) then
+        chunks = {
+            { "/" .. vim.fn.strcharpart(pattern, 0, cpos) },
+            { vim.fn.strcharpart(pattern, cpos, 1), "Cursor" },
+            { vim.fn.strcharpart(pattern, cpos + 1,
+                vim.fn.strchars(pattern) - cpos - 1) },
+        }
+    end
     if not total then
-        echo({ { text } })
+        echo(chunks)
         return
     end
     local count = ("[%d/%d]"):format(cur or 0, total)
@@ -170,7 +183,8 @@ local function echo_search(pattern, cur, total)
     -- counts sit left of that area too
     local reserved = vim.o.showcmd and 12 or 1
     local pad = vim.o.columns - vim.api.nvim_strwidth(text) - #count - reserved
-    echo({ { text }, { (pad >= 1 and string.rep(" ", pad) or " ") .. count } })
+    chunks[#chunks + 1] = { (pad >= 1 and string.rep(" ", pad) or " ") .. count }
+    echo(chunks)
 end
 
 ---Interactive prompt: incremental highlight + view scroll while typing, like
@@ -210,7 +224,7 @@ function M.search()
         if not vim.o.incsearch then
             -- native without 'incsearch' shows only the pattern while typing:
             -- no jump, no highlights, no count until <CR>
-            echo_search(pattern)
+            echo_search(pattern, nil, nil, cpos)
             return
         end
         if cur then
@@ -222,12 +236,9 @@ function M.search()
         live = pattern ~= "" and { buf = buf, pattern = pattern, cur = matches[cur] }
             or prev_live
         M.repaint()
-        -- no rendered caret here: the live jump above already puts the real
-        -- cursor on the current match, a second one in the echo area would
-        -- be a duplicate ("Cursor" chunk here previously caused exactly that)
-        -- no count either -- native shows [cur/total] only once the search is
-        -- accepted, never while typing
-        echo_search(pattern)
+        -- no count here -- native shows [cur/total] only once the search is
+        -- accepted, never while typing (the mid-pattern caret is echo_search's)
+        echo_search(pattern, nil, nil, cpos)
     end
 
     ---@param keep_live boolean put the pre-prompt highlights back (plain
