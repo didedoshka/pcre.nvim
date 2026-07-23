@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Offline checks for pcre.nvim: static analysis + the headless suite.
-# Needs rg on PATH; no network, no user config.
+# Offline; no network, no user config.
 #
 #   tests/run.sh          both tiers
 #   tests/run.sh spec     just the headless suite

@@ -1,9 +1,9 @@
 -- Offline suite: loads every module for real (lua-ls does not catch
--- cross-module breakage) and drives the rg-backed logic against scratch
+-- cross-module breakage) and drives the FFI-backed logic against scratch
 -- buffers. The prompt loop is driven for real too: keys stuffed into the
 -- typeahead before search() are what getcharstr() consumes, so these tests
 -- exercise the same code path as interactive typing.
--- Needs rg on PATH; no network, no user config.
+-- Offline; no network, no user config.
 local failed = 0
 
 local function t(name, fn)
@@ -43,13 +43,25 @@ local function cursor()
     return vim.api.nvim_win_get_cursor(0)
 end
 
--- simplified extmarks of the search namespace: { {row, col, end_col, hl}, ... }
+-- simplified matchaddpos() items of the windows showing b, in buffer order:
+-- { {row, col, end_col, hl}, ... } (0-based, like the old extmark shape)
 local function search_marks(b)
-    local ns = vim.api.nvim_get_namespaces()["pcre"]
     local out = {}
-    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, { details = true })) do
-        out[#out + 1] = { m[2], m[3], m[4].end_col, m[4].hl_group }
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == b then
+            for _, m in ipairs(vim.fn.getmatches(win)) do
+                for i = 1, 8 do
+                    local p = m["pos" .. i]
+                    if type(p) == "table" then
+                        out[#out + 1] = { p[1] - 1, p[2] - 1, p[2] - 1 + p[3], m.group }
+                    end
+                end
+            end
+        end
     end
+    table.sort(out, function(x, y)
+        return x[1] < y[1] or (x[1] == y[1] and x[2] < y[2])
+    end)
     return out
 end
 
@@ -96,7 +108,7 @@ t("find: no matches is an empty list", function()
     eq(search.find(b, "xyzzy"), {})
 end)
 
-t("find: bad pattern reports the rg error", function()
+t("find: bad pattern reports the PCRE2 error", function()
     local b = buf_with({ "a" })
     local matches, err = search.find(b, "(?=")
     assert(matches == nil and err and err:find("PCRE2"), err)
@@ -442,7 +454,7 @@ t("run: no match notifies and leaves the buffer alone", function()
     eq(lines_of(b), { "abc" })
 end)
 
-t("run: bad pattern surfaces the rg error via notify", function()
+t("run: bad pattern surfaces the PCRE2 error via notify", function()
     local b = show({ "abc" })
     local msg
     local orig = vim.notify

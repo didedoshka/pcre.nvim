@@ -1,8 +1,7 @@
--- ":S" -- vim's :s with PCRE2. Matching and capture-group expansion are both
--- delegated to rg: a --json pass for positions plus an -o -r pass for the
--- expanded replacement text, zipped in match order (rg's JSON does not carry
--- capture groups, so expansion needs the second pass).
-local rg = require("pcre.rg")
+-- ":S" -- vim's :s with PCRE2. One in-process pass: pcre2.find matches and
+-- expands the replacement per match (pcre2_substitute against the live match
+-- data), so positions and expansions can never disagree.
+local pcre2 = require("pcre.pcre2")
 
 local M = {}
 
@@ -49,9 +48,9 @@ function M.parse(args)
     return { pat = parts[1], repl = parts[2] or "", flags = flags }
 end
 
----Canonicalise the replacement for rg -r: "$1X" would silently mean a group
----named "1X", so digit groups become ${1}; vim-style \1..\9 and \0 are accepted
----too. "$$" stays a literal "$", "\\" a literal backslash.
+---Canonicalise the replacement for pcre2_substitute: digit groups become ${1}
+---so adjacent text can never smear into the group name, and vim-style \1..\9
+---and \0 are accepted too. "$$" stays a literal "$", "\\" a literal backslash.
 ---@param repl string
 ---@return string
 function M.normalize_repl(repl)
@@ -91,42 +90,28 @@ end
 ---@return psub.Edit[]? edits, string? err
 function M.compute(buf, line1, line2, spec)
     local lines = vim.api.nvim_buf_get_lines(buf, line1 - 1, line2, false)
-    local text = table.concat(lines, "\n") .. "\n"
-    local base = spec.flags.i and { "-i" } or {}
-    local events, err = rg.json(vim.list_extend(vim.deepcopy(base), { "--", spec.pat }), text)
-    if not events then
+    local matches, err = pcre2.find(lines, spec.pat,
+        { caseless = spec.flags.i, repl = M.normalize_repl(spec.repl) })
+    if not matches then
         return nil, err
     end
-    local repls, rerr = rg.expand(
-        vim.list_extend(vim.deepcopy(base),
-            { "-r", M.normalize_repl(spec.repl), "--", spec.pat }),
-        text)
-    if not repls then
-        return nil, rerr
-    end
     local edits = {}
-    local n = 0
-    for _, ev in ipairs(events) do
-        if ev.type == "match" then
-            local first = true
-            for _, sm in ipairs(ev.data.submatches) do
-                n = n + 1
-                -- vim semantics: without /g only the first match on each line
-                if spec.flags.g or first then
-                    edits[#edits + 1] = {
-                        lnum = line1 - 1 + ev.data.line_number,
-                        scol = sm.start,
-                        ecol = sm["end"],
-                        text = repls[n],
-                    }
-                end
-                first = false
+    local seen = {} ---@type table<integer, true> lines that already have an edit
+    for _, m in ipairs(matches) do
+        -- vim semantics: without /g only the first match on each line
+        if spec.flags.g or not seen[m.lnum] then
+            if m.text:find("\n", 1, true) then
+                -- everything downstream (spans, preview) assumes one-line texts
+                return nil, "replacement expanded to multiple lines; not supported"
             end
+            edits[#edits + 1] = {
+                lnum = line1 - 1 + m.lnum,
+                scol = m.scol,
+                ecol = m.ecol,
+                text = m.text,
+            }
         end
-    end
-    if n ~= #repls then
-        -- a template that expands across lines breaks the one-line-per-match zip
-        return nil, "replacement expanded to multiple lines; not supported"
+        seen[m.lnum] = true
     end
     return edits
 end
@@ -220,7 +205,7 @@ function M.run(o)
     local win = vim.api.nvim_get_current_win()
     local edits, cerr = M.compute(buf, o.line1, o.line2, spec)
     if not edits then
-        return vim.notify(cerr or "rg failed", vim.log.levels.ERROR)
+        return vim.notify(cerr or "PCRE2 failed", vim.log.levels.ERROR)
     end
     if #edits == 0 then
         return vim.notify("Pattern not found: " .. spec.pat, vim.log.levels.ERROR)

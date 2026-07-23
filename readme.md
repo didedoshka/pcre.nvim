@@ -1,10 +1,14 @@
 # pcre.nvim
 
-`/` search and `:s` substitute with **PCRE2** regex, matched by ripgrep instead
-of Vim's regex engine. Lookahead, lookbehind, backreferences, `\d`/`\w`, named
-groups — no more `\v`, `\zs`, or escaping parentheses.
+`/` search and `:s` substitute with **PCRE2** regex, matched in-process by
+libpcre2 over LuaJIT FFI instead of Vim's regex engine. Lookahead, lookbehind,
+backreferences, `\d`/`\w`, named groups — no more `\v`, `\zs`, or escaping
+parentheses.
 
-Requires Neovim >= 0.10 and `rg` (ripgrep) built with PCRE2 on `$PATH`.
+Requires Neovim >= 0.10 (a LuaJIT build, which is the default) and the
+`libpcre2-8` shared library — preinstalled on practically every Linux (grep and
+git link it); on macOS `brew install pcre2`. If either is missing, `setup()`
+notifies once and leaves everything native.
 
 ## Install
 
@@ -35,8 +39,12 @@ Prefer less invasive? Skip the abbreviation and map `<leader>/` instead of `/`.
 
 `search()` opens a `/` prompt that looks and feels like native search:
 incremental highlighting and view scrolling while you type ('incsearch'),
-matches highlighted with `Search`/`CurSearch`, jumplist entries, `'wrapscan'`
-and `'hlsearch'` respected, shared native search history, `:noh` to clear.
+matches highlighted with `Search`/`CurSearch`, a right-aligned `[cur/total]`
+match count, jumplist entries, `'wrapscan'` and `'hlsearch'` respected, shared
+native search history, `:noh` to clear. Highlights are drawn in the same stage
+as native hlsearch, so they layer exactly like it — over a sign's line
+background, under a visual selection. A terminal paste while the prompt is open
+lands in the pattern (newlines flatten to spaces).
 
 Inside the prompt: `<CR>` accept (empty pattern repeats the last search),
 `<Esc>`/`<C-c>` cancel, `<Left>`/`<Right>` move the cursor, `<BS>`, `<C-u>`
@@ -76,7 +84,7 @@ replacement (`y`/`n`/`a`/`q`/`l`); `i` — ignore case.
 
 Replacement syntax: `$1` or `\1` for groups, `${name}` for named groups, `$0`
 for the whole match, `$$` for a literal `$`. (`$1X` is safe — it is normalised
-to `${1}X` before rg sees it, so it never silently means a group named `1X`.)
+to `${1}X` before PCRE2 sees it, so it never silently means a group named `1X`.)
 
 With `substitute_abbrev = true`, typing `:s/`, `:%s/`, `:'<,'>s/`, `:12,34s/`
 expands to `:S/` as you type. (Not a real `cnoreabbrev`: vim abbreviations

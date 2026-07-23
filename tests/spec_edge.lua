@@ -1,11 +1,11 @@
 -- Second offline tier: the edges spec.lua does not reach -- history navigation
 -- in the prompt, ownership of n/N after a failed search, the jump mark, the
--- zip between rg's two passes, the 'report' message, preview without a preview
+-- one-pass match+expand agreement, the 'report' message, preview without a preview
 -- window, and the exact firing conditions of the :noh and :s hooks.
 --
 -- Its own nvim (run.sh loops over tests/spec*.lua): the module's last-pattern
 -- state is process-global and several tests here need it fresh.
--- Needs rg on PATH; no network, no user config.
+-- Offline; no network, no user config.
 local failed = 0
 
 local function t(name, fn)
@@ -40,11 +40,22 @@ local function cursor()
 end
 
 local function search_marks(b)
-    local ns = vim.api.nvim_get_namespaces()["pcre"]
     local out = {}
-    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, { details = true })) do
-        out[#out + 1] = { m[2], m[3], m[4].end_col, m[4].hl_group }
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == b then
+            for _, m in ipairs(vim.fn.getmatches(win)) do
+                for i = 1, 8 do
+                    local p = m["pos" .. i]
+                    if type(p) == "table" then
+                        out[#out + 1] = { p[1] - 1, p[2] - 1, p[2] - 1 + p[3], m.group }
+                    end
+                end
+            end
+        end
     end
+    table.sort(out, function(x, y)
+        return x[1] < y[1] or (x[1] == y[1] and x[2] < y[2])
+    end)
     return out
 end
 

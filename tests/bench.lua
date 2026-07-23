@@ -1,13 +1,11 @@
--- Benchmark: how much does matching with rg --pcre2 cost versus Vim's own
--- regex engine? The question is real -- every keystroke in the "/" prompt and
--- every n/N runs M.find(), which spawns rg, pipes the whole buffer to it over
--- stdin, and json-decodes the result. Vim's incsearch stays in-process. This
--- measures the like-for-like cost: one full-buffer "find all matches" pass,
--- pcre (rg subprocess) against native (matchbufline, same engine incsearch uses).
+-- Benchmark: how much does matching with in-process libpcre2 (LuaJIT FFI) cost
+-- versus Vim's own regex engine? Every keystroke in the "/" prompt and every
+-- n/N runs M.find(); this measures the like-for-like cost: one full-buffer
+-- "find all matches" pass, pcre (FFI) against native (matchbufline, the same
+-- engine incsearch uses).
 --
 -- Not part of the offline suite -- it's timing, not pass/fail, and takes a few
 -- seconds. Run it by hand:  nvim --headless --clean --cmd "set rtp+=$PWD" -l tests/bench.lua
--- Needs rg on PATH.
 local search = require("pcre.search")
 
 local function ms(ns) return ns / 1e6 end
@@ -57,9 +55,8 @@ local cases = {
 local sizes = { 100, 1000, 10000, 50000 }
 local iters = 25
 
-print(("pcre.nvim find-all benchmark  (nvim %s, rg %s, median of %d)")
-    :format(vim.version() and tostring(vim.version()) or "?",
-        vim.trim((vim.fn.system("rg --version"):gsub("\n.*", ""))), iters))
+print(("pcre.nvim find-all benchmark  (nvim %s, libpcre2 FFI, median of %d)")
+    :format(vim.version() and tostring(vim.version()) or "?", iters))
 print(("%-22s %8s %10s %10s %8s"):format("case / lines", "matches", "pcre ms", "native ms", "x"))
 print(string.rep("-", 62))
 
@@ -75,10 +72,10 @@ for _, c in ipairs(cases) do
     end
 end
 
--- Attribute the pcre cost: an empty one-line buffer isolates the fork+exec +
--- pipe + json-decode overhead that's paid on every keystroke regardless of size.
+-- The fixed per-call floor: a one-line buffer isolates the buffer-read +
+-- compile-cache-miss overhead that's paid on every keystroke regardless of size.
 local b = make_buf(1)
-local spawn = time(function() search.find(b, "nomatch_xyzzy") end, iters)
+local floor = time(function() search.find(b, "nomatch_xyzzy") end, iters)
 print(string.rep("-", 62))
-print(("rg spawn floor (1 line, 0 matches): %.2f ms -- paid per keystroke")
-    :format(spawn))
+print(("per-call floor (1 line, 0 matches): %.2f ms -- paid per keystroke")
+    :format(floor))

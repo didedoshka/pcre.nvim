@@ -6,7 +6,7 @@
 -- -- expand("<cword>") on a blank line just returns "" -- so every test here
 -- passes with the guards removed. Both tests below were checked the other way
 -- round too: unguard either call and that test, and only that test, fails.
--- Needs rg on PATH; no network, no user config.
+-- Offline; no network, no user config.
 local failed = 0
 
 local function t(name, fn)
