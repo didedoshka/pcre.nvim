@@ -178,6 +178,33 @@ t("accepting echoes /pattern with a right-aligned [cur/total]", function()
     eq(#last, vim.o.columns - (vim.o.showcmd and 12 or 1))
 end)
 
+t("with 'noincsearch' nothing moves or counts until <CR>", function()
+    show(corpus, { 1, 0 })
+    vim.o.incsearch = false
+    local moved = {} -- cursor positions set while the prompt is open
+    local real_set = vim.api.nvim_win_set_cursor
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_win_set_cursor = function(w, pos)
+        moved[#moved + 1] = pos
+        return real_set(w, pos)
+    end
+    local ok, err = pcall(function()
+        local seen = capture_echo(function()
+            type_keys("foo<CR>")
+            ps.search()
+        end)
+        -- while typing: bare /pattern, no count, no jump; <CR> jumps and counts
+        eq(seen[#seen - 1], "/foo")
+        assert(seen[#seen]:match("^/foo%s+%[2/5%]$"), "unexpected accept echo: " .. seen[#seen])
+        eq(moved, { { 1, 8 } })
+    end)
+    vim.api.nvim_win_set_cursor = real_set
+    vim.o.incsearch = true
+    if not ok then
+        error(err, 0)
+    end
+end)
+
 t("a terminal paste lands in the pattern, newlines flattened", function()
     show({ "x", "paste me" }, { 1, 0 })
     -- a bracketed paste while prompting goes through vim.paste, never through

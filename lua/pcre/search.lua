@@ -207,6 +207,12 @@ function M.search()
         -- a regex error mid-typing (unclosed group etc.) just means no matches yet
         matches = matches or {}
         cur = nearest(matches, view.lnum, view.col)
+        if not vim.o.incsearch then
+            -- native without 'incsearch' shows only the pattern while typing:
+            -- no jump, no highlights, no count until <CR>
+            echo_search(pattern)
+            return
+        end
         if cur then
             vim.api.nvim_win_set_cursor(win, { matches[cur].lnum, matches[cur].scol })
         else

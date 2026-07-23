@@ -38,7 +38,8 @@ Prefer less invasive? Skip the abbreviation and map `<leader>/` instead of `/`.
 ## Search
 
 `search()` opens a `/` prompt that looks and feels like native search:
-incremental highlighting and view scrolling while you type ('incsearch'),
+incremental highlighting and view scrolling while you type when 'incsearch' is
+on (with 'noincsearch' nothing moves or highlights until `<CR>`),
 matches highlighted with `Search`/`CurSearch`, a right-aligned `[cur/total]`
 match count, jumplist entries, `'wrapscan'` and `'hlsearch'` respected, shared
 native search history, `:noh` to clear. Highlights are drawn in the same stage
