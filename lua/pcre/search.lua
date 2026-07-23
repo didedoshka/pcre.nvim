@@ -157,17 +157,18 @@ end
 
 ---The native search echo: "/pat", and a right-aligned [cur/total] like
 ---'shortmess' without S shows. total == nil leaves the count out.
----cpos (a character index) renders the edit position as a Cursor cell, but
----only mid-pattern: at the end there is no cell under the caret, and the real
----cursor already sits on the current match -- a rendered one there would be a
----duplicate ("Cursor" chunk at the end previously caused exactly that).
+---cpos (a character index) renders the edit position as a Cursor cell -- a
+---space cell when the caret is past the end. Only the prompt passes it, and
+---the prompt hides the real cursor (see search()): with incsearch the real
+---one sits on the current match, and both at once are two cursors on screen.
 local function echo_search(pattern, cur, total, cpos)
     local text = "/" .. pattern
     local chunks = { { text } }
-    if cpos and cpos < vim.fn.strchars(pattern) then
+    if cpos then
+        local at = vim.fn.strcharpart(pattern, cpos, 1)
         chunks = {
             { "/" .. vim.fn.strcharpart(pattern, 0, cpos) },
-            { vim.fn.strcharpart(pattern, cpos, 1), "Cursor" },
+            { at == "" and " " or at, "Cursor" },
             { vim.fn.strcharpart(pattern, cpos + 1,
                 vim.fn.strchars(pattern) - cpos - 1) },
         }
@@ -252,6 +253,12 @@ function M.search()
     end
 
     vim.v.hlsearch = 0
+    -- one cursor on screen, like native: while prompting the echoed caret is
+    -- the cursor, and the real one (parked on the current match by the
+    -- incsearch jump) is hidden behind a fully-blended guicursor group
+    local saved_guicursor = vim.o.guicursor
+    vim.api.nvim_set_hl(0, "PcreHiddenCursor", { blend = 100, nocombine = true })
+    vim.o.guicursor = "a:PcreHiddenCursor"
     update()
     local saved_paste = vim.paste
     ---@diagnostic disable-next-line: duplicate-set-field
@@ -367,6 +374,7 @@ function M.search()
         end
     end)
     vim.paste = saved_paste
+    vim.o.guicursor = saved_guicursor
     if not ok_loop then
         error(loop_err, 0)
     end

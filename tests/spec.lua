@@ -216,18 +216,36 @@ t("search: <Left> renders a Cursor cell at the edit position", function()
     eq(calls[#calls - 1], { { "/a" }, { "b", "Cursor" }, { "c" } })
 end)
 
-t("search: no Cursor cell with the caret at the end of the pattern", function()
+t("search: caret at the end of the pattern is a space Cursor cell", function()
     show({ "abc" }, { 1, 0 })
     type_keys("abc<Esc>")
     local calls = echo_calls(ps.search)
-    eq(calls[#calls - 1], { { "/abc" } })
+    eq(calls[#calls - 1], { { "/abc" }, { " ", "Cursor" }, { "" } })
 end)
 
-t("search: <Right> back to the end drops the Cursor cell again", function()
+t("search: <Right> back to the end moves the Cursor cell past the text again", function()
     show({ "abc" }, { 1, 0 })
     type_keys("abc<Left><Right><Esc>")
     local calls = echo_calls(ps.search)
-    eq(calls[#calls - 1], { { "/abc" } })
+    eq(calls[#calls - 1], { { "/abc" }, { " ", "Cursor" }, { "" } })
+end)
+
+t("search: the real cursor is hidden while prompting and restored after", function()
+    show({ "abc" }, { 1, 0 })
+    local saved = vim.o.guicursor
+    local during
+    type_keys("a<Esc>")
+    local real = vim.api.nvim_echo
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_echo = function(...)
+        during = vim.o.guicursor -- sampled inside the prompt loop
+        return real(...)
+    end
+    local ok, err = pcall(ps.search)
+    vim.api.nvim_echo = real
+    assert(ok, err)
+    eq(during, "a:PcreHiddenCursor")
+    eq(vim.o.guicursor, saved)
 end)
 
 t("search: <C-u> after <Left> clears only up to the cursor", function()

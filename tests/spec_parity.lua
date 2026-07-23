@@ -198,8 +198,9 @@ t("with 'noincsearch' nothing moves or counts until <CR>", function()
             type_keys("foo<CR>")
             ps.search()
         end)
-        -- while typing: bare /pattern, no count, no jump; <CR> jumps and counts
-        eq(seen[#seen - 1], "/foo")
+        -- while typing: /pattern + the caret's space cell, no count, no jump;
+        -- <CR> jumps and counts
+        eq(seen[#seen - 1], "/foo ")
         assert(seen[#seen]:match("^/foo%s+%[2/5%]$"), "unexpected accept echo: " .. seen[#seen])
         eq(moved, { { 1, 8 } })
     end)
