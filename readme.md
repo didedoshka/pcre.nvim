@@ -47,13 +47,15 @@ as native hlsearch, so they layer exactly like it — over a sign's line
 background, under a visual selection. A terminal paste while the prompt is open
 lands in the pattern (newlines flatten to spaces).
 
-Inside the prompt: `<CR>` accept (empty pattern repeats the last search),
-`<Esc>`/`<C-c>` cancel, `<Left>`/`<Right>` move the cursor (rendered as a
-`Cursor` cell in the prompt; the buffer cursor is hidden while it is open,
-so there is one cursor on screen, like native), `<BS>`, `<C-u>`
-clear to start, `<C-w>` delete word, `<C-r>{reg}` insert register
-(`<C-r><C-w>` word under cursor, `<C-r><C-a>` WORD), `<Up>`/`<Down>`/`<C-p>`/
-`<C-n>` history.
+The prompt is the real cmdline (`vim.fn.input()`), so its cursor is the
+native one — blink, `guicursor` shape, and all cmdline editing (`<Left>`/
+`<Right>`, `<BS>`, `<C-u>`, `<C-w>`, pastes) come from nvim itself.
+`<CR>` accepts (empty pattern repeats the last search), `<Esc>`/`<C-c>`
+cancel, `<BS>` past empty leaves the search. Only two things are remapped for
+the prompt's lifetime: `<Up>`/`<Down>`/`<C-p>`/`<C-n>` walk the *search*
+history (`input()` would use its own), and `<C-r>{reg}` inserts registers
+with newlines flattened to spaces (`<C-r><C-w>` word under cursor,
+`<C-r><C-a>` WORD).
 
 `next()`/`prev()` (`n`/`N`) re-run the pattern, so they stay correct after
 edits; with no pcre search active they fall through to native `n`/`N` (so `*`

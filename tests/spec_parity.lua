@@ -36,7 +36,9 @@ local function cursor()
 end
 
 local function type_keys(keys)
-    vim.fn.feedkeys(vim.keycode(keys), "n")
+    -- "t": handled as typed -- a mapped <Esc> in the cmdline would act like <CR>
+    -- (:h c_<Esc>), and the prompt's own temporary c-mode maps must fire
+    vim.fn.feedkeys(vim.keycode(keys), "t")
 end
 
 local search = require("pcre.search")
@@ -198,10 +200,12 @@ t("with 'noincsearch' nothing moves or counts until <CR>", function()
             type_keys("foo<CR>")
             ps.search()
         end)
-        -- while typing: /pattern + the caret's space cell, no count, no jump;
-        -- <CR> jumps and counts
-        eq(seen[#seen - 1], "/foo ")
+        -- while typing nothing is echoed at all (the cmdline draws itself,
+        -- there is no jump); <CR> jumps and counts
         assert(seen[#seen]:match("^/foo%s+%[2/5%]$"), "unexpected accept echo: " .. seen[#seen])
+        for i = 1, #seen - 1 do
+            assert(not seen[i]:find("/foo", 1, true), "echoed while typing: " .. seen[i])
+        end
         eq(moved, { { 1, 8 } })
     end)
     vim.api.nvim_win_set_cursor = real_set

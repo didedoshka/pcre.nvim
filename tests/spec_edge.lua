@@ -60,7 +60,9 @@ local function search_marks(b)
 end
 
 local function type_keys(keys)
-    vim.fn.feedkeys(vim.keycode(keys), "n")
+    -- "t": handled as typed -- a mapped <Esc> in the cmdline would act like <CR>
+    -- (:h c_<Esc>), and the prompt's own temporary c-mode maps must fire
+    vim.fn.feedkeys(vim.keycode(keys), "t")
 end
 
 -- record what the module echoes: nvim_echo with history=false never reaches

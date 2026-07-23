@@ -157,22 +157,9 @@ end
 
 ---The native search echo: "/pat", and a right-aligned [cur/total] like
 ---'shortmess' without S shows. total == nil leaves the count out.
----cpos (a character index) renders the edit position as a Cursor cell -- a
----space cell when the caret is past the end. Only the prompt passes it, and
----the prompt hides the real cursor (see search()): with incsearch the real
----one sits on the current match, and both at once are two cursors on screen.
-local function echo_search(pattern, cur, total, cpos)
+local function echo_search(pattern, cur, total)
     local text = "/" .. pattern
     local chunks = { { text } }
-    if cpos then
-        local at = vim.fn.strcharpart(pattern, cpos, 1)
-        chunks = {
-            { "/" .. vim.fn.strcharpart(pattern, 0, cpos) },
-            { at == "" and " " or at, "Cursor" },
-            { vim.fn.strcharpart(pattern, cpos + 1,
-                vim.fn.strchars(pattern) - cpos - 1) },
-        }
-    end
     if not total then
         echo(chunks)
         return
@@ -188,44 +175,29 @@ local function echo_search(pattern, cur, total, cpos)
     echo(chunks)
 end
 
----Interactive prompt: incremental highlight + view scroll while typing, like
----'incsearch'. Meant for a normal-mode "/" mapping.
+---Interactive prompt on the real cmdline (vim.fn.input), so the cursor in the
+---prompt IS the native cursor -- blink, guicursor shape, <Left>/<Right>,
+---<C-u>/<C-w>/<C-r>, pastes are all native cmdline editing. An echoed
+---facsimile can't do that: a "Cursor"-highlighted cell neither blinks nor
+---takes the ci cursor shape (measured; two earlier attempts). Only the
+---incremental matching (CmdlineChanged) and search history (input() would use
+---the "@" history) are ours.
 function M.search()
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local view = vim.fn.winsaveview()
-    local pattern = ""
-    local cpos = 0 -- character index into pattern, for <Left>/<Right>
-    local hist = { pos = 0, stash = "" }
     local matches = {} ---@type pcre2.Match[]
     local cur = nil ---@type integer?
     local hlsearch = vim.v.hlsearch -- native highlights, hidden while we type
     local prev_live = live -- what was painted before the prompt, for cancel
 
-    -- Insert text at cpos, moving the cursor past it (typed chars, pastes).
-    local function insert_at_cursor(text)
-        local before = vim.fn.strcharpart(pattern, 0, cpos)
-        local after = vim.fn.strcharpart(pattern, cpos, vim.fn.strchars(pattern) - cpos)
-        pattern = before .. text .. after
-        cpos = cpos + vim.fn.strchars(text)
-    end
-
-    -- <cword>/<cWORD> raise E348 on a blank line (verified); nothing in this
-    -- loop catches it, so guard here and treat "no word" as an empty insert.
-    local function cursor_text(what)
-        local ok, text = pcall(vim.fn.expand, what)
-        return ok and text or ""
-    end
-
-    local function update()
+    local function update(pattern)
         matches = pattern ~= "" and M.find(buf, pattern) or {}
         -- a regex error mid-typing (unclosed group etc.) just means no matches yet
         matches = matches or {}
         cur = nearest(matches, view.lnum, view.col)
         if not vim.o.incsearch then
-            -- native without 'incsearch' shows only the pattern while typing:
-            -- no jump, no highlights, no count until <CR>
-            echo_search(pattern, nil, nil, cpos)
+            -- native without 'incsearch': no jump, no highlights while typing
             return
         end
         if cur then
@@ -237,9 +209,7 @@ function M.search()
         live = pattern ~= "" and { buf = buf, pattern = pattern, cur = matches[cur] }
             or prev_live
         M.repaint()
-        -- no count here -- native shows [cur/total] only once the search is
-        -- accepted, never while typing (the mid-pattern caret is echo_search's)
-        echo_search(pattern, nil, nil, cpos)
+        vim.cmd("redraw") -- paint under the open cmdline, like native incsearch
     end
 
     ---@param keep_live boolean put the pre-prompt highlights back (plain
@@ -252,132 +222,124 @@ function M.search()
         echo({})
     end
 
-    vim.v.hlsearch = 0
-    -- one cursor on screen, like native: while prompting the echoed caret is
-    -- the cursor, and the real one (parked on the current match by the
-    -- incsearch jump) is hidden behind a fully-blended guicursor group
-    local saved_guicursor = vim.o.guicursor
-    vim.api.nvim_set_hl(0, "PcreHiddenCursor", { blend = 100, nocombine = true })
-    vim.o.guicursor = "a:PcreHiddenCursor"
-    update()
+    local group = vim.api.nvim_create_augroup("pcre.prompt", { clear = true })
+    vim.api.nvim_create_autocmd("CmdlineChanged", {
+        group = group,
+        callback = function()
+            if vim.fn.getcmdtype() == "@" then
+                update(vim.fn.getcmdline())
+            end
+        end,
+    })
+
+    -- input() reads and writes the "@" history; a search prompt must use the
+    -- search history, so these four take it over for the prompt's lifetime
+    -- (input() is modal, no other cmdline can run meanwhile)
+    local hist = { pos = 0, stash = "" }
+    local function hist_move(delta)
+        if hist.pos == 0 then
+            if delta < 0 then
+                return
+            end
+            hist.stash = vim.fn.getcmdline()
+        end
+        local pos = hist.pos + delta
+        local entry = pos == 0 and hist.stash or vim.fn.histget("search", -pos)
+        if pos < 0 or entry == "" and pos > 0 then
+            return -- past the oldest entry: stay, like native
+        end
+        hist.pos = pos
+        vim.fn.setcmdline(entry)
+    end
+    local function insert_at_cmdpos(text)
+        local line, pos = vim.fn.getcmdline(), vim.fn.getcmdpos()
+        vim.fn.setcmdline(line:sub(1, pos - 1) .. text .. line:sub(pos), pos + #text)
+    end
+    -- <cword>/<cWORD> raise E348 on a blank line (verified), which would abort
+    -- the whole prompt; guard and treat "no word" as an empty insert. The
+    -- incsearch jump has moved the cursor to the current match, so like native
+    -- c_CTRL-R_CTRL-W this picks up the word being matched.
+    local function insert_cursor_text(what)
+        local ok, text = pcall(vim.fn.expand, what)
+        insert_at_cmdpos(ok and text or "")
+    end
+    local cmaps = {
+        ["<Up>"] = function() hist_move(1) end,
+        ["<C-p>"] = function() hist_move(1) end,
+        ["<Down>"] = function() hist_move(-1) end,
+        ["<C-n>"] = function() hist_move(-1) end,
+        -- backspace past an empty pattern leaves the search, like native "/"
+        -- (input() would just sit there). <C-c>, not <Esc>: an <Esc> coming
+        -- from a mapping executes the cmdline instead of quitting (:h c_<Esc>)
+        ["<BS>"] = function()
+            return vim.fn.getcmdline() == "" and "<C-c>" or "<BS>"
+        end,
+        -- native c_CTRL-R would insert a multiline register with literal ^M;
+        -- the pattern is one line, so newlines flatten to spaces instead
+        ["<C-r>"] = function()
+            local ok, reg = pcall(vim.fn.getcharstr) -- pcall: <C-c> raises
+            if not ok then
+                return
+            end
+            if reg == vim.keycode("<C-w>") then
+                insert_cursor_text("<cword>")
+            elseif reg == vim.keycode("<C-a>") then
+                insert_cursor_text("<cWORD>")
+            elseif #reg == 1 then
+                insert_at_cmdpos((vim.fn.getreg(reg):gsub("\n", " ")))
+            end
+        end,
+    }
+    for lhs, fn in pairs(cmaps) do
+        vim.keymap.set("c", lhs, fn, { expr = lhs == "<BS>" })
+    end
+
     local saved_paste = vim.paste
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.paste = function(plines, _)
         -- a terminal paste while prompting lands in the pattern; newlines
         -- flatten to spaces like <C-r> pastes, the pattern is one line
-        insert_at_cursor((table.concat(plines, " ")))
-        update()
+        insert_at_cmdpos(table.concat(plines, " "))
         return true
     end
-    local ok_loop, loop_err = pcall(function()
-        while true do
-            local ok, key = pcall(vim.fn.getcharstr) -- pcall: <C-c> raises
-            if not ok then
-                key = "\27"
-            end
-            if key == "\r" or key == "\n" then
-                if pattern == "" then
-                    local prev = pcre_last()
-                    if not prev then
-                        cancel(true)
-                        return
-                    end
-                    pattern = prev -- empty pattern repeats the last search, like native
-                    update()
-                end
-                vim.fn.histadd("search", pattern)
-                if not cur then
-                    cancel(false)
-                    own(pattern) -- after cancel(): a failed search still owns n/N
-                    echo({ { "E486: Pattern not found: " .. pattern, "ErrorMsg" } })
-                    return
-                end
-                own(pattern)
-                local m = matches[cur]
-                vim.fn.winrestview(view) -- jump from the origin, so m' lands there
-                jump(win, m)
-                live = vim.o.hlsearch and { buf = buf, pattern = pattern, cur = m } or nil
-                M.repaint()
-                echo_search(pattern, cur, #matches)
-                return
-            elseif key == "\27" or key == vim.keycode("<C-c>") then
-                cancel(true)
-                return
-            elseif key == vim.keycode("<BS>") or key == "\x80kb" or key == "\127" then
-                if pattern == "" then -- backspace past empty leaves search, like native
-                    cancel(true)
-                    return
-                end
-                if cpos > 0 then
-                    local before = vim.fn.strcharpart(pattern, 0, cpos - 1)
-                    local after = vim.fn.strcharpart(pattern, cpos,
-                        vim.fn.strchars(pattern) - cpos)
-                    pattern = before .. after
-                    cpos = cpos - 1
-                    update()
-                end
-            elseif key == vim.keycode("<C-u>") then
-                -- native semantics: clear from the start of line up to the cursor
-                pattern = vim.fn.strcharpart(pattern, cpos, vim.fn.strchars(pattern) - cpos)
-                cpos = 0
-                update()
-            elseif key == vim.keycode("<C-w>") then
-                local before = vim.fn.strcharpart(pattern, 0, cpos)
-                local after = vim.fn.strcharpart(pattern, cpos,
-                    vim.fn.strchars(pattern) - cpos)
-                before = before:gsub("%s+$", ""):gsub("%S+$", "")
-                cpos = vim.fn.strchars(before)
-                pattern = before .. after
-                update()
-            elseif key == vim.keycode("<C-r>") then
-                local rok, reg = pcall(vim.fn.getcharstr)
-                if rok and reg == vim.keycode("<C-w>") then
-                    -- incsearch has moved the cursor to the current match, so like
-                    -- native c_CTRL-R_CTRL-W this picks up the word being matched
-                    insert_at_cursor(cursor_text("<cword>"))
-                elseif rok and reg == vim.keycode("<C-a>") then
-                    insert_at_cursor(cursor_text("<cWORD>"))
-                elseif rok and #reg == 1 then
-                    insert_at_cursor((vim.fn.getreg(reg):gsub("\n", " ")))
-                end
-                update()
-            elseif key == vim.keycode("<Left>") then
-                cpos = math.max(0, cpos - 1)
-                update()
-            elseif key == vim.keycode("<Right>") then
-                cpos = math.min(vim.fn.strchars(pattern), cpos + 1)
-                update()
-            elseif key == vim.keycode("<Up>") or key == vim.keycode("<C-p>") then
-                if hist.pos == 0 then
-                    hist.stash = pattern
-                end
-                local entry = vim.fn.histget("search", -(hist.pos + 1))
-                if entry ~= "" then
-                    hist.pos = hist.pos + 1
-                    pattern = entry
-                    cpos = vim.fn.strchars(pattern)
-                    update()
-                end
-            elseif key == vim.keycode("<Down>") or key == vim.keycode("<C-n>") then
-                if hist.pos > 0 then
-                    hist.pos = hist.pos - 1
-                    pattern = hist.pos == 0 and hist.stash
-                        or vim.fn.histget("search", -hist.pos)
-                    cpos = vim.fn.strchars(pattern)
-                    update()
-                end
-            elseif key:byte(1) >= 32 and key:byte(1) ~= 128 then
-                insert_at_cursor(key)
-                update()
-            end
-            -- other special keys (mouse, ...): ignored
-        end
-    end)
+
+    vim.v.hlsearch = 0
+    update("")
+    -- cancelreturn must be impossible to type; \1 can't land in a pattern
+    local ok_in, pattern = pcall(vim.fn.input, { prompt = "/", cancelreturn = "\1" })
     vim.paste = saved_paste
-    vim.o.guicursor = saved_guicursor
-    if not ok_loop then
-        error(loop_err, 0)
+    for lhs in pairs(cmaps) do
+        pcall(vim.keymap.del, "c", lhs)
     end
+    vim.api.nvim_del_augroup_by_id(group)
+    if not ok_in or pattern == "\1" then -- <Esc> (cancelreturn) or <C-c> (raises)
+        cancel(true)
+        return
+    end
+    if pattern == "" then
+        local prev = pcre_last()
+        if not prev then
+            cancel(true)
+            return
+        end
+        pattern = prev -- empty pattern repeats the last search, like native
+    end
+    vim.fn.histadd("search", pattern)
+    matches = M.find(buf, pattern) or {}
+    cur = nearest(matches, view.lnum, view.col)
+    if not cur then
+        cancel(false)
+        own(pattern) -- after cancel(): a failed search still owns n/N
+        echo({ { "E486: Pattern not found: " .. pattern, "ErrorMsg" } })
+        return
+    end
+    own(pattern)
+    local m = matches[cur]
+    vim.fn.winrestview(view) -- jump from the origin, so m' lands there
+    jump(win, m)
+    live = vim.o.hlsearch and { buf = buf, pattern = pattern, cur = m } or nil
+    M.repaint()
+    echo_search(pattern, cur, #matches)
 end
 
 local function step(backward)

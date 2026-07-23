@@ -1,8 +1,8 @@
 -- Offline suite: loads every module for real (lua-ls does not catch
 -- cross-module breakage) and drives the FFI-backed logic against scratch
--- buffers. The prompt loop is driven for real too: keys stuffed into the
--- typeahead before search() are what getcharstr() consumes, so these tests
--- exercise the same code path as interactive typing.
+-- buffers. The prompt is driven for real too: keys stuffed into the typeahead
+-- before search() are what the cmdline (vim.fn.input) consumes, so these
+-- tests exercise the same code path as interactive typing.
 -- Offline; no network, no user config.
 local failed = 0
 
@@ -66,7 +66,9 @@ local function search_marks(b)
 end
 
 local function type_keys(keys)
-    vim.fn.feedkeys(vim.keycode(keys), "n")
+    -- "t": handled as typed -- a mapped <Esc> in the cmdline would act like <CR>
+    -- (:h c_<Esc>), and the prompt's own temporary c-mode maps must fire
+    vim.fn.feedkeys(vim.keycode(keys), "t")
 end
 
 local search = require("pcre.search")
@@ -193,59 +195,28 @@ t("search: <Right> moves the cursor back toward the end", function()
     eq(cursor(), { 1, 0 })
 end)
 
--- capture nvim_echo chunks while driving the prompt, to check the rendered
--- caret; the real nvim_echo still runs, so the code path stays the same
-local function echo_calls(fn)
-    local calls = {}
-    local real = vim.api.nvim_echo
-    vim.api.nvim_echo = function(chunks, history, opts)
-        calls[#calls + 1] = vim.deepcopy(chunks)
-        return real(chunks, history, opts)
-    end
-    local ok, err = pcall(fn)
-    vim.api.nvim_echo = real
-    assert(ok, err)
-    return calls
-end
-
-t("search: <Left> renders a Cursor cell at the edit position", function()
+-- the prompt runs on the real cmdline (vim.fn.input), so the cursor in it is
+-- the native one -- blink and guicursor shape can't be asserted headless (they
+-- live in the terminal), but the cmdline type and cursor position can; full
+-- keystroke-parity against native "/" is in spec_parity.lua
+t("search: the prompt is a real cmdline and <Left> moves its cursor", function()
     show({ "abc" }, { 1, 0 })
-    type_keys("abc<Left><Left><Esc>")
-    local calls = echo_calls(ps.search)
-    -- the last call is the cancel's echo({}); before it, the prompt after <Left><Left>
-    eq(calls[#calls - 1], { { "/a" }, { "b", "Cursor" }, { "c" } })
-end)
-
-t("search: caret at the end of the pattern is a space Cursor cell", function()
-    show({ "abc" }, { 1, 0 })
-    type_keys("abc<Esc>")
-    local calls = echo_calls(ps.search)
-    eq(calls[#calls - 1], { { "/abc" }, { " ", "Cursor" }, { "" } })
-end)
-
-t("search: <Right> back to the end moves the Cursor cell past the text again", function()
-    show({ "abc" }, { 1, 0 })
-    type_keys("abc<Left><Right><Esc>")
-    local calls = echo_calls(ps.search)
-    eq(calls[#calls - 1], { { "/abc" }, { " ", "Cursor" }, { "" } })
-end)
-
-t("search: the real cursor is hidden while prompting and restored after", function()
-    show({ "abc" }, { 1, 0 })
-    local saved = vim.o.guicursor
-    local during
-    type_keys("a<Esc>")
-    local real = vim.api.nvim_echo
-    ---@diagnostic disable-next-line: duplicate-set-field
-    vim.api.nvim_echo = function(...)
-        during = vim.o.guicursor -- sampled inside the prompt loop
-        return real(...)
-    end
-    local ok, err = pcall(ps.search)
-    vim.api.nvim_echo = real
-    assert(ok, err)
-    eq(during, "a:PcreHiddenCursor")
-    eq(vim.o.guicursor, saved)
+    local sampled = {} -- { cmdtype, cmdline, cmdpos } at each change
+    local group = vim.api.nvim_create_augroup("pcre.test.cmdline", { clear = true })
+    vim.api.nvim_create_autocmd("CmdlineChanged", {
+        group = group,
+        callback = function()
+            sampled[#sampled + 1] =
+                { vim.fn.getcmdtype(), vim.fn.getcmdline(), vim.fn.getcmdpos() }
+        end,
+    })
+    type_keys("ab<Left><Esc>")
+    ps.search()
+    vim.api.nvim_del_augroup_by_id(group)
+    -- <Left> alone fires no CmdlineChanged; the "b" insert shows pos 3, and
+    -- the sampled type is "@" (input()), a real cmdline
+    eq(sampled, { { "@", "a", 2 }, { "@", "ab", 3 } })
+    eq(cursor(), { 1, 0 }) -- cancelled
 end)
 
 t("search: <C-u> after <Left> clears only up to the cursor", function()
