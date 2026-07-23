@@ -173,8 +173,9 @@ t("accepting echoes /pattern with a right-aligned [cur/total]", function()
     local last = seen[#seen]
     local pat, count = last:match("^(/foo)%s+(%[2/5%])$")
     assert(pat and count, "unexpected echo: " .. vim.inspect(last))
-    -- right-aligned: one cell short of full width, or the echo would scroll
-    eq(#last, vim.o.columns - 1)
+    -- right-aligned, but clear of the 'showcmd' cells: a message reaching into
+    -- them triggers a hit-enter prompt (measured on 0.13-dev)
+    eq(#last, vim.o.columns - (vim.o.showcmd and 12 or 1))
 end)
 
 t("a terminal paste lands in the pattern, newlines flattened", function()

@@ -164,7 +164,12 @@ local function echo_search(pattern, cur, total)
         return
     end
     local count = ("[%d/%d]"):format(cur or 0, total)
-    local pad = vim.o.columns - vim.api.nvim_strwidth(text) - #count - 1
+    -- keep clear of the 'showcmd' cells at the end of the last line: a message
+    -- reaching into them triggers a hit-enter prompt (measured on 0.13-dev,
+    -- threshold columns-12 with showcmd, columns-1 without); native search
+    -- counts sit left of that area too
+    local reserved = vim.o.showcmd and 12 or 1
+    local pad = vim.o.columns - vim.api.nvim_strwidth(text) - #count - reserved
     echo({ { text }, { (pad >= 1 and string.rep(" ", pad) or " ") .. count } })
 end
 
