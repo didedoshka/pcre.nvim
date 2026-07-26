@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            neovim: stable
+          # oldest supported release
+          - os: ubuntu-latest
+            neovim: v0.10.4
+          # exercises the dylib load paths, untested anywhere else
+          - os: macos-latest
+            neovim: stable
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+      - if: runner.os == 'macOS'
+        run: brew install pcre2
+      - run: tests/run.sh spec
