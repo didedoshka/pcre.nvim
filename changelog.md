@@ -3,6 +3,13 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.2 — 2026-07-30
+
+- Star family parity fix: native `*`/`#` search from the start of the word,
+  not from the cursor (measured — `*` on the whitespace before a word skips
+  that word, `#` from mid-word skips the current occurrence). `search_cword`
+  now does the same; only the regex syntax differs from native.
+
 ## v0.1.1 — 2026-07-30
 
 - Star family: `search_cword({ backward?, exact? })` searches the word under

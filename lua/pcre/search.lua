@@ -342,9 +342,9 @@ function M.search()
     echo_search(pattern, cur, #matches)
 end
 
----Jump to the [count]th nearest match of pat from the cursor: the shared back
----end of n/N and the star family. pat must already be owned.
-local function goto_nearest(pat, backward, count)
+---Jump to the [count]th nearest match of pat, from the cursor (n/N) or from
+---an explicit {lnum, col} origin (the star family). pat must already be owned.
+local function goto_nearest(pat, backward, count, from)
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local matches = M.find(buf, pat)
@@ -352,7 +352,7 @@ local function goto_nearest(pat, backward, count)
         echo({ { "E486: Pattern not found: " .. pat, "ErrorMsg" } })
         return
     end
-    local pos = vim.api.nvim_win_get_cursor(win)
+    local pos = from or vim.api.nvim_win_get_cursor(win)
     local lnum, col = pos[1], pos[2]
     local idx, wrapped
     for _ = 1, count do
@@ -453,7 +453,20 @@ function M.search_cword(opts)
     end
     vim.fn.histadd("search", pat)
     own(pat)
-    goto_nearest(pat, opts.backward or false, count)
+    -- native * and # search from the start of the word, not from the cursor:
+    -- measured, * on the whitespace before a word skips that word, and # from
+    -- mid-word skips the current occurrence. So the origin is the match
+    -- covering-or-after the cursor on its line (falling back to the cursor).
+    local pos = vim.api.nvim_win_get_cursor(0)
+    local from = nil
+    local line = vim.api.nvim_buf_get_lines(0, pos[1] - 1, pos[1], false)
+    for _, m in ipairs(pcre2.find(line, pat) or {}) do
+        if m.ecol > pos[2] then
+            from = { pos[1], m.scol }
+            break
+        end
+    end
+    goto_nearest(pat, opts.backward or false, count, from)
 end
 
 return M

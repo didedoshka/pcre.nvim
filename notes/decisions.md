@@ -17,9 +17,12 @@ path.
   and `\b` against a non-word edge demands a word char *outside* the match —
   the word would never match itself. pcre2 probes its own `\w` (`^\w`/`\w$`
   against the word), not a Lua guess: UTF+UCP make it unicode-aware.
-- Deviations from native, accepted: case stays PCRE2's (native `*` follows
-  'ignorecase'), and with the cursor on whitespace before a word, we land on
-  that word where native skips past it to the following occurrence.
+- The only deviation from native, accepted: case stays PCRE2's (native `*`
+  follows 'ignorecase').
+- Measured trap: native `*`/`#` search from the *start of the word*, not from
+  the cursor — `*` on the whitespace before a word skips that word, `#` from
+  mid-word skips the current occurrence. So the jump origin is the match
+  covering-or-after the cursor on its line, not the cursor position.
 
 ## 2026-07-26 — versioning: SemVer 0.x
 

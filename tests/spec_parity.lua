@@ -143,6 +143,26 @@ t("star trajectory matches native *", function()
     eq(pcre, native)
 end)
 
+t("star from the whitespace before a word matches native (skips that word)", function()
+    local lines = { "  word x word", "word" }
+    show(lines, { 1, 0 })
+    vim.cmd("normal! *")
+    local native = cursor()
+    show(lines, { 1, 0 })
+    search.search_cword()
+    eq(cursor(), native)
+end)
+
+t("# from mid-word matches native (skips the current occurrence)", function()
+    local lines = { "word x", "y word z", "word" }
+    show(lines, { 2, 4 })
+    vim.cmd("normal! #")
+    local native = cursor()
+    show(lines, { 2, 4 })
+    search.search_cword({ backward = true })
+    eq(cursor(), native)
+end)
+
 t(":S output equals :s for /g, first-per-line, range and /i", function()
     local cases = {
         { spec = "/foo/X/g", range = { 1, 7 } },
