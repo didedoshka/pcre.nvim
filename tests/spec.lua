@@ -344,6 +344,84 @@ t("n after * follows the native search, and our highlights go", function()
     eq(search_marks(b), {})
 end)
 
+-- star family ------------------------------------------------------------------
+
+t("star: searches \\bword\\b and owns n/N", function()
+    local b = show({ "one two", "two one", "onef one" }, { 1, 0 })
+    search.search_cword()
+    eq(vim.fn.getreg("/"), "\\bone\\b")
+    eq(cursor(), { 2, 4 })
+    eq(vim.v.hlsearch, 0) -- native highlighting stays off, ours is painted
+    assert(#search_marks(b) > 0, "expected pcre highlights")
+    search.next() -- pcre n: "onef" must not match
+    eq(cursor(), { 3, 5 })
+end)
+
+t("star: backward (#) finds the previous occurrence", function()
+    show({ "foo bar", "baz foo", "foo" }, { 2, 4 })
+    search.search_cword({ backward = true })
+    eq(cursor(), { 1, 0 })
+end)
+
+t("star: the g* flavour matches inside words", function()
+    show({ "one onef", "bone" }, { 1, 0 })
+    search.search_cword({ exact = false })
+    eq(vim.fn.getreg("/"), "one")
+    eq(cursor(), { 1, 4 })
+    search.next()
+    eq(cursor(), { 2, 1 })
+end)
+
+t("star: metacharacters in the word are escaped, matched literally", function()
+    show({ "a.b axb", "a.b" }, { 1, 0 })
+    vim.bo.iskeyword = vim.bo.iskeyword .. ",46" -- "." joins the word
+    search.search_cword()
+    eq(vim.fn.getreg("/"), "\\ba\\.b\\b")
+    eq(cursor(), { 2, 0 }) -- "axb" does not match the literal dot
+end)
+
+t("star: no \\b against a non-word edge -- the word could never match itself", function()
+    show({ "hi! say hi!" }, { 1, 0 })
+    vim.bo.iskeyword = vim.bo.iskeyword .. ",33" -- "!" joins the word
+    search.search_cword()
+    eq(vim.fn.getreg("/"), "\\bhi!")
+    eq(cursor(), { 1, 8 })
+end)
+
+t("star: unicode word chars bound with \\b (UCP)", function()
+    show({ "кот и кот", "котик" }, { 1, 0 })
+    search.search_cword()
+    eq(vim.fn.getreg("/"), "\\bкот\\b")
+    eq(cursor(), { 1, 10 })
+    search.next() -- "котик" must not match: и is a word char to UCP \b
+    eq(cursor(), { 1, 0 })
+end)
+
+t("star: blank line echoes E348 and moves nothing", function()
+    show({ "", "word" }, { 1, 0 })
+    search.search_cword()
+    eq(cursor(), { 1, 0 })
+end)
+
+t("star: a count jumps count occurrences ahead", function()
+    show({ "w w w w" }, { 1, 0 })
+    vim.keymap.set("n", "*", search.search_cword)
+    vim.fn.feedkeys("2*", "tx")
+    eq(cursor(), { 1, 4 })
+    vim.keymap.del("n", "*")
+end)
+
+t("n: a count jumps count matches", function()
+    show({ "q1 q2 q3 q4" }, { 1, 0 })
+    type_keys("q[0-9]<CR>")
+    ps.search()
+    eq(cursor(), { 1, 3 })
+    vim.keymap.set("n", "n", ps.next)
+    vim.fn.feedkeys("2n", "tx")
+    eq(cursor(), { 1, 9 })
+    vim.keymap.del("n", "n")
+end)
+
 t("search: hlsearch off leaves no highlights after accept", function()
     vim.o.hlsearch = false
     local b = show({ "hlfoo" }, { 1, 4 })

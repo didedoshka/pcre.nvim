@@ -3,6 +3,18 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.1 — 2026-07-30
+
+- Star family: `search_cword({ backward?, exact? })` searches the word under
+  the cursor as a PCRE pattern (`\bword\b`; `exact = false` is the `g*`
+  flavour, no boundaries), so `*`/`#`/`g*`/`g#` can speak the same regex
+  syntax as `/` instead of handing `@/` to the native engine. `\b` is added
+  only where the word's edge is a PCRE2 word char, metacharacters are
+  escaped, and while `:Pcre`-toggled off the mapping falls through to the
+  native key.
+- `n`/`N` and the star family accept a count (`3n`), including the native
+  fallthrough.
+
 ## v0.1.0 — 2026-07-26
 
 The engine moved in-process: the rg subprocess is gone, matching now happens in

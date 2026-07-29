@@ -342,17 +342,9 @@ function M.search()
     echo_search(pattern, cur, #matches)
 end
 
-local function step(backward)
-    local pat = pcre_last()
-    if not pat then
-        -- no pcre search yet: pass through, so n after * or a plugin's native
-        -- search keeps working
-        local ok, err = pcall(vim.cmd.normal, { backward and "N" or "n", bang = true })
-        if not ok then
-            echo({ { tostring(err):gsub("^.*Vim%(normal%):", ""), "ErrorMsg" } })
-        end
-        return
-    end
+---Jump to the [count]th nearest match of pat from the cursor: the shared back
+---end of n/N and the star family. pat must already be owned.
+local function goto_nearest(pat, backward, count)
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local matches = M.find(buf, pat)
@@ -361,11 +353,18 @@ local function step(backward)
         return
     end
     local pos = vim.api.nvim_win_get_cursor(win)
-    local idx, wrapped = nearest(matches, pos[1], pos[2], backward)
-    if not idx then
-        echo({ { backward and "E384: search hit TOP without match for: " .. pat
-            or "E385: search hit BOTTOM without match for: " .. pat, "ErrorMsg" } })
-        return
+    local lnum, col = pos[1], pos[2]
+    local idx, wrapped
+    for _ = 1, count do
+        local w
+        idx, w = nearest(matches, lnum, col, backward)
+        if not idx then
+            echo({ { backward and "E384: search hit TOP without match for: " .. pat
+                or "E385: search hit BOTTOM without match for: " .. pat, "ErrorMsg" } })
+            return
+        end
+        wrapped = wrapped or w
+        lnum, col = matches[idx].lnum, matches[idx].scol
     end
     jump(win, matches[idx])
     if vim.o.hlsearch then
@@ -382,6 +381,22 @@ local function step(backward)
     end
 end
 
+local function step(backward)
+    local count = vim.v.count1
+    local pat = pcre_last()
+    if not pat then
+        -- no pcre search yet: pass through, so n after a native search (a
+        -- plugin's, gd, an unmapped *) keeps working
+        local keys = (count > 1 and count or "") .. (backward and "N" or "n")
+        local ok, err = pcall(vim.cmd.normal, { keys, bang = true })
+        if not ok then
+            echo({ { tostring(err):gsub("^.*Vim%(normal%):", ""), "ErrorMsg" } })
+        end
+        return
+    end
+    goto_nearest(pat, backward, count)
+end
+
 ---Next match of the last search (an "n" mapping).
 function M.next()
     step(false)
@@ -390,6 +405,55 @@ end
 ---Previous match of the last search (an "N" mapping).
 function M.prev()
     step(true)
+end
+
+---PCRE2 metacharacters escaped so the word matches literally.
+local function pcre_escape(s)
+    return (s:gsub("[%^%$%.%|%?%*%+%(%)%[%]{}\\]", "\\%0"))
+end
+
+---The star-family pattern for the word under the cursor: escaped, and for the
+---exact variants bounded by \b -- but only where the edge char is a word char
+---*to PCRE2*. 'iskeyword' can put chars in <cword> that PCRE2's \w does not
+---cover (a lisp "-", a "!"), and \b against a non-word edge demands a word
+---char outside the match, so the word would never match itself. pcre2 probes
+---its own \w (UTF + UCP, unicode-aware) instead of a Lua guess.
+local function cword_pattern(exact)
+    -- expand() raises E348 on a blank line (verified for <C-r><C-w> above);
+    -- no word under the cursor is a nil pattern, not an error
+    local ok, word = pcall(vim.fn.expand, "<cword>")
+    if not ok or word == "" then
+        return nil
+    end
+    local pat = pcre_escape(word)
+    if exact then
+        local head = pcre2.find({ word }, "^\\w") or {}
+        local tail = pcre2.find({ word }, "\\w$") or {}
+        pat = (#head > 0 and "\\b" or "") .. pat .. (#tail > 0 and "\\b" or "")
+    end
+    return pat
+end
+
+---@class pcre.CwordOpts
+---@field backward? boolean previous occurrence instead of next ("#")
+---@field exact? boolean word boundaries; false is the g* flavour (default true)
+
+---Search for the word under the cursor as a pcre pattern (the "*"/"#"/"g*"/
+---"g#" mappings), so star searches speak the same regex syntax as "/":
+---\bword\b instead of the native \<word\>. Like "/", always case-sensitive --
+---native * follows 'ignorecase', pcre patterns take (?i) instead.
+---@param opts? pcre.CwordOpts
+function M.search_cword(opts)
+    opts = opts or {}
+    local count = vim.v.count1
+    local pat = cword_pattern(opts.exact ~= false)
+    if not pat then
+        echo({ { "E348: No string under cursor", "ErrorMsg" } })
+        return
+    end
+    vim.fn.histadd("search", pat)
+    own(pat)
+    goto_nearest(pat, opts.backward or false, count)
 end
 
 return M

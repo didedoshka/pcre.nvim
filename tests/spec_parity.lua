@@ -125,6 +125,24 @@ t("N trajectory matches native backward search", function()
     eq(ours, native)
 end)
 
+t("star trajectory matches native *", function()
+    local lines = { "word sword words", "word", "x word" }
+    local function walk(star, next_)
+        show(lines, { 1, 0 })
+        star()
+        local traj = { cursor() }
+        for _ = 1, 3 do
+            next_()
+            traj[#traj + 1] = cursor()
+        end
+        return traj
+    end
+    local native = walk(function() vim.cmd("normal! *") end,
+        function() vim.cmd("normal! n") end)
+    local pcre = walk(search.search_cword, search.next)
+    eq(pcre, native)
+end)
+
 t(":S output equals :s for /g, first-per-line, range and /i", function()
     local cases = {
         { spec = "/foo/X/g", range = { 1, 7 } },

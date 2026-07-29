@@ -4,6 +4,23 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — the star family is pcre too
+
+A native `*` flipped the session between two regex syntaxes: `@/` and the
+history held `\<word\>`, and the next `/` spoke PCRE again. `search_cword()`
+keeps it one language — the pattern is built from `<cword>` (`\bword\b`,
+g-variants bare, metacharacters escaped), owns `@/`, and shares n/N's jump
+path.
+
+- `\b` goes only where the edge char is a word char *to PCRE2*: 'iskeyword'
+  can put chars in `<cword>` that `\w` does not cover (a lisp `-`, a `!`),
+  and `\b` against a non-word edge demands a word char *outside* the match —
+  the word would never match itself. pcre2 probes its own `\w` (`^\w`/`\w$`
+  against the word), not a Lua guess: UTF+UCP make it unicode-aware.
+- Deviations from native, accepted: case stays PCRE2's (native `*` follows
+  'ignorecase'), and with the cursor on whitespace before a word, we land on
+  that word where native skips past it to the following occurrence.
+
 ## 2026-07-26 — versioning: SemVer 0.x
 
 While `0.y.z`, breaking bumps `y`, everything else bumps `z`. `1.0.0` is

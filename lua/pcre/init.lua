@@ -45,6 +45,20 @@ function M.search()
     search.search()
 end
 
+---The "*"/"#"/"g*"/"g#" mappings: pcre search for the word under the cursor.
+---@param opts? pcre.CwordOpts
+function M.search_cword(opts)
+    if not enabled then
+        local o = opts or {}
+        local key = (o.exact == false and "g" or "") .. (o.backward and "#" or "*")
+        local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+        -- "n": the mapping this call sits in must not fire again
+        vim.api.nvim_feedkeys(count .. key, "n", false)
+        return
+    end
+    search.search_cword(opts)
+end
+
 ---@class pcre.Opts
 ---@field substitute_abbrev? boolean expand a typed :s (with any range) into :S
 
