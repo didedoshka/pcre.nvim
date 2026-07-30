@@ -1052,6 +1052,83 @@ t("s-rewrite 'enter' mode: :su and a bare :s stay native", function()
     ps.setup({ substitute_abbrev = true })
 end)
 
+t("s-rewrite 'enter' mode: live pcre preview via extmarks, buffer untouched", function()
+    ps.setup({ substitute_abbrev = "enter" })
+    vim.o.inccommand = "nosplit"
+    local b = show({ "foo bar foo" })
+    local tick = vim.api.nvim_buf_get_changedtick(b)
+    local ns = vim.api.nvim_get_namespaces()["pcre.live_preview"]
+    -- snapshot mid-session state per typed line: this autocmd is registered
+    -- after the plugin's, so it sees the marks of the same keystroke
+    -- (feedkeys "x" force-closes the cmdline once the typeahead drains, so
+    -- nothing can be asserted after the call -- measured)
+    local snaps = {}
+    local au = vim.api.nvim_create_autocmd("CmdlineChanged", {
+        callback = function()
+            snaps[vim.fn.getcmdline()] = {
+                marks = vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, { details = true }),
+                incc = vim.o.inccommand,
+                tick = vim.api.nvim_buf_get_changedtick(b),
+            }
+        end,
+    })
+    vim.fn.feedkeys(":%s/fo(?=o)/XY/g\r", "tx")
+    vim.api.nvim_del_autocmd(au)
+    -- pattern phase: matches highlighted, nothing replaced, native parked
+    local pat = snaps["%s/fo(?=o)"]
+    eq(#pat.marks, 2)
+    eq(pat.marks[1][4].hl_group, "Search")
+    eq(pat.incc, "")
+    -- replacement phase: conceal over each match, expansion as inline
+    -- virt_text; without /g only the first match of the line previews
+    local function render(snap)
+        local conceals, virts = 0, 0
+        for _, m in ipairs(snap.marks) do
+            if m[4].conceal then
+                conceals = conceals + 1
+            end
+            if m[4].virt_text then
+                virts = virts + 1
+                eq(m[4].virt_text[1][1], "XY")
+            end
+        end
+        return { conceals, virts }
+    end
+    eq(render(snaps["%s/fo(?=o)/XY"]), { 1, 1 })
+    local repl = snaps["%s/fo(?=o)/XY/g"]
+    eq(render(repl), { 2, 2 })
+    eq(repl.tick, tick) -- the buffer was never edited while previewing
+    -- accept: the swap ran :S for real, the preview is torn down
+    eq(lines_of(b), { "XYo bar XYo" })
+    eq(#vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}), 0)
+    eq(vim.o.inccommand, "nosplit")
+    ps.setup({ substitute_abbrev = true })
+end)
+
+t("s-rewrite 'enter' mode: cancelling tears the preview down, buffer intact", function()
+    ps.setup({ substitute_abbrev = "enter" })
+    local b = show({ "esc foo" })
+    local tick = vim.api.nvim_buf_get_changedtick(b)
+    local ns = vim.api.nvim_get_namespaces()["pcre.live_preview"]
+    local mid
+    local au = vim.api.nvim_create_autocmd("CmdlineChanged", {
+        callback = function()
+            if vim.fn.getcmdline() == "%s/foo/ZZ" then
+                mid = #vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {})
+            end
+        end,
+    })
+    -- no <CR>: feedkeys "x" cancels the drained cmdline like <Esc> (measured)
+    vim.fn.feedkeys(":%s/foo/ZZ", "tx")
+    vim.api.nvim_del_autocmd(au)
+    assert(mid and mid > 0, "expected preview marks mid-session")
+    eq(#vim.api.nvim_buf_get_extmarks(b, ns, 0, -1, {}), 0)
+    eq(lines_of(b), { "esc foo" })
+    eq(vim.api.nvim_buf_get_changedtick(b), tick)
+    eq(vim.o.inccommand, "nosplit")
+    ps.setup({ substitute_abbrev = true })
+end)
+
 t("toggle: off hands / back to native", function()
     local b = show({ "n.n" })
     -- typed, not ps.toggle(): proves :Pcre reaches it and that the :s rewrite

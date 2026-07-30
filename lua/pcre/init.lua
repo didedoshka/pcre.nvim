@@ -136,13 +136,26 @@ function M.setup(opts)
     })
 
     if opts.substitute_abbrev == "enter" then
+        local agroup = vim.api.nvim_create_augroup("pcre.abbrev", {})
         -- The authentic flavour: setcmdline() inside CmdlineLeave still
         -- changes what executes (measured), so the swap to :S happens at the
         -- <CR> and is never visible. The : history records the swapped line
         -- (measured), so the typed one is put back once the command has run.
-        vim.api.nvim_create_autocmd("CmdlineLeave", {
-            group = vim.api.nvim_create_augroup("pcre.abbrev", {}),
+        -- While the :s is being typed, substitute.live_preview renders the
+        -- pcre preview without ever touching the buffer.
+        vim.api.nvim_create_autocmd("CmdlineChanged", {
+            group = agroup,
             callback = function()
+                if not enabled or vim.fn.getcmdtype() ~= ":" then
+                    return
+                end
+                substitute.live_preview(vim.fn.getcmdline())
+            end,
+        })
+        vim.api.nvim_create_autocmd("CmdlineLeave", {
+            group = agroup,
+            callback = function()
+                substitute.live_stop()
                 if not enabled or vim.v.event.cmdtype ~= ":" or vim.v.event.abort then
                     return
                 end

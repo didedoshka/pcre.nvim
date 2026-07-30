@@ -4,6 +4,34 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — live preview for the typed :s: extmarks, never buffer edits
+
+The "enter" mode needed its own 'inccommand': while the line says `:s`, the
+native preview machinery runs the native engine, and there is no hook to
+replace a builtin command's preview. Reimplementation candidates, measured:
+
+- Buffer-edit + `undojoin` revert works (tree stable across cycles, u/C-r
+  correct; E790 only right after an undo, pcall-able) but touches real text:
+  marks and other plugins' extmarks would drift on every keystroke. Kept as
+  the documented fallback.
+- Winner: never touch the buffer. Each pending edit renders as an extmark
+  `conceal = ""` over the match plus inline `virt_text` with the expansion.
+  Measured under a PTY: the screen draws `XY bar LONGER end` for
+  shorter *and* longer replacements, exactly like the real edit, including
+  with the cmdline open. Undo, marks, 'modified', changedtick: untouched by
+  construction.
+- Native 'inccommand' must be parked for the session or it edits the buffer
+  for real underneath: setting it to "" inside CmdlineChanged suppresses the
+  same keystroke's native preview (measured: changedtick never moves), and
+  nvim restores the option itself at CmdlineLeave (measured) — teardown
+  restores it too for the mid-session unmatch case.
+- Approximation, declared: the pattern-phase highlight group is `Search`
+  (native's exact group unverified — cosmetic); `inccommand=split`'s preview
+  window is not reproduced, matches on screen are the preview.
+- Measured trap (tests): feedkeys("x") force-closes a drained cmdline like
+  <Esc>, so mid-session state must be asserted from a CmdlineChanged
+  autocmd registered after the plugin's, never after feedkeys returns.
+
 ## 2026-07-30 — :s stays :s on screen (the "enter" abbrev mode)
 
 Measured: setcmdline() inside CmdlineLeave still changes what executes, so

@@ -3,6 +3,17 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.6 — 2026-07-30
+
+- The "enter" abbrev mode now has a live PCRE preview while the `:s` is being
+  typed — the missing half of v0.1.5. The buffer is never edited: matches
+  conceal under inline virt_text carrying their expansion (drawn exactly like
+  the real replacement — PTY-verified), so undo, marks and 'modified' cannot
+  be affected. Pattern phase highlights matches; the replacement phase
+  respects `/g`, `/i`, `'gdefault'` and `:s//`. Native `'inccommand'` is
+  parked for the session and restored on leave. `inccommand=split`'s extra
+  preview window is not reproduced (nosplit-style only).
+
 ## v0.1.5 — 2026-07-30
 
 - `substitute_abbrev = "enter"`: the typed `:s` swaps to `:S` only at `<CR>`,

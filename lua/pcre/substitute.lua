@@ -199,6 +199,130 @@ local function confirm(buf, win, edits)
     return keep
 end
 
+local ns_live = vim.api.nvim_create_namespace("pcre.live_preview")
+
+---Live-preview state for one cmdline session; nil when inactive.
+---@type { buf: integer, incc: string, wins: table<integer, { cl: integer, cc: string }> }?
+local lp = nil
+
+---Park native 'inccommand' -- it edits the buffer for real and would fight
+---our render (nvim restores the option at CmdlineLeave on its own, measured;
+---we restore it too for the mid-session case) -- and force conceal rendering
+---in every window showing buf.
+local function lp_start(buf)
+    lp = { buf = buf, incc = vim.o.inccommand, wins = {} }
+    vim.o.inccommand = ""
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == buf then
+            lp.wins[win] = { cl = vim.wo[win].conceallevel, cc = vim.wo[win].concealcursor }
+            vim.wo[win].conceallevel = 2
+            vim.wo[win].concealcursor = "nvc"
+        end
+    end
+end
+
+---Tear the live preview down: marks off, options back, native preview back.
+function M.live_stop()
+    if not lp then
+        return
+    end
+    if vim.api.nvim_buf_is_valid(lp.buf) then
+        vim.api.nvim_buf_clear_namespace(lp.buf, ns_live, 0, -1)
+    end
+    vim.o.inccommand = lp.incc
+    for win, saved in pairs(lp.wins) do
+        if vim.api.nvim_win_is_valid(win) then
+            vim.wo[win].conceallevel = saved.cl
+            vim.wo[win].concealcursor = saved.cc
+        end
+    end
+    lp = nil
+end
+
+---Unescaped separator occurrences in rest (whose first char IS the separator):
+---1 while the pattern is being typed, 2+ once the replacement is underway.
+local function sep_count(rest)
+    local sep = rest:sub(1, 1)
+    local n, i = 0, 1
+    while i <= #rest do
+        local c = rest:sub(i, i)
+        if c == "\\" then
+            i = i + 2
+        else
+            if c == sep then
+                n = n + 1
+            end
+            i = i + 1
+        end
+    end
+    return n
+end
+
+---The pcre 'inccommand' for a typed :s (the "enter" abbrev mode). The buffer
+---is never touched: each pending edit renders as a conceal over the match
+---plus inline virt_text carrying its expansion, which the screen draws
+---exactly like the real replacement (measured under a PTY, cmdline open) --
+---so undo, marks and 'modified' cannot be harmed, by construction.
+---@param line string the current cmdline
+function M.live_preview(line)
+    local range, rest = line:match("^(%s*[%d%%,%.%$<>'+%-;]*)s([^%w%s\\\"|].*)$")
+    if not range then
+        M.live_stop() -- not (or no longer) a :s -- hand the session back
+        return
+    end
+    if not lp and vim.o.inccommand == "" then
+        return -- the user runs without preview; keep it that way
+    end
+    local buf = vim.api.nvim_get_current_buf()
+    if not lp then
+        lp_start(buf)
+    end
+    vim.api.nvim_buf_clear_namespace(buf, ns_live, 0, -1)
+    local spec = M.parse(rest)
+    if not spec then
+        return
+    end
+    if spec.pat == "" then
+        spec.pat = search.last_pattern() or ""
+        if spec.pat == "" then
+            return
+        end
+    end
+    -- nvim resolves the typed range (%, marks, ...) to line numbers for us
+    local l1, l2
+    local okp, parsed = pcall(vim.api.nvim_parse_cmd, line, {})
+    if okp and parsed.range and #parsed.range > 0 then
+        l1 = parsed.range[1]
+        l2 = parsed.range[2] or parsed.range[1]
+    else
+        l1 = vim.api.nvim_win_get_cursor(0)[1]
+        l2 = l1
+    end
+    if sep_count(rest) < 2 then
+        -- pattern phase: matches highlight, nothing is replaced yet
+        local lines = vim.api.nvim_buf_get_lines(buf, l1 - 1, l2, false)
+        for _, m in ipairs(pcre2.find(lines, spec.pat) or {}) do
+            if m.ecol > m.scol then
+                vim.api.nvim_buf_set_extmark(buf, ns_live, l1 - 1 + m.lnum - 1, m.scol,
+                    { end_col = m.ecol, hl_group = "Search" })
+            end
+        end
+    else
+        local edits = M.compute(buf, l1, l2, spec)
+        for _, e in ipairs(edits or {}) do
+            if e.ecol > e.scol then
+                vim.api.nvim_buf_set_extmark(buf, ns_live, e.lnum - 1, e.scol,
+                    { end_col = e.ecol, conceal = "" })
+            end
+            if #e.text > 0 then
+                vim.api.nvim_buf_set_extmark(buf, ns_live, e.lnum - 1, e.scol,
+                    { virt_text = { { e.text, "Substitute" } }, virt_text_pos = "inline" })
+            end
+        end
+    end
+    vim.cmd("redraw")
+end
+
 ---:S implementation (the user command callback).
 function M.run(o)
     local spec, perr = M.parse(o.args)
