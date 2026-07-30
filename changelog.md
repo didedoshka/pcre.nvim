@@ -3,6 +3,15 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.5 — 2026-07-30
+
+- `substitute_abbrev = "enter"`: the typed `:s` swaps to `:S` only at `<CR>`,
+  inside CmdlineLeave — the cmdline never shows the rewrite and the `:`
+  history keeps exactly what was typed. The trade: while typing, the
+  `'inccommand'` preview is the native engine's reading of the pattern.
+  `substitute_abbrev = true` keeps the visible swap and the true pcre
+  preview.
+
 ## v0.1.4 — 2026-07-30
 
 The remaining native search contexts, all PCRE now — multi-line patterns

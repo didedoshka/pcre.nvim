@@ -85,7 +85,11 @@ function M.search_cword(opts)
 end
 
 ---@class pcre.Opts
----@field substitute_abbrev? boolean expand a typed :s (with any range) into :S
+---@field substitute_abbrev? boolean|"enter" expand a typed :s (with any range)
+---into :S. true rewrites the cmdline visibly the moment the separator is
+---typed (and the 'inccommand' preview is the pcre one); "enter" swaps inside
+---CmdlineLeave instead, so the cmdline shows the :s you typed all along --
+---but while typing, the preview is native :s reading a pcre pattern.
 
 ---@param opts? pcre.Opts
 function M.setup(opts)
@@ -131,7 +135,35 @@ function M.setup(opts)
         end,
     })
 
-    if opts.substitute_abbrev then
+    if opts.substitute_abbrev == "enter" then
+        -- The authentic flavour: setcmdline() inside CmdlineLeave still
+        -- changes what executes (measured), so the swap to :S happens at the
+        -- <CR> and is never visible. The : history records the swapped line
+        -- (measured), so the typed one is put back once the command has run.
+        vim.api.nvim_create_autocmd("CmdlineLeave", {
+            group = vim.api.nvim_create_augroup("pcre.abbrev", {}),
+            callback = function()
+                if not enabled or vim.v.event.cmdtype ~= ":" or vim.v.event.abort then
+                    return
+                end
+                local line = vim.fn.getcmdline()
+                -- range chars, lowercase s, a separator, and the rest; native
+                -- stays reachable as :su, and a bare :s never matches
+                local range, rest = line:match("^(%s*[%d%%,%.%$<>'+%-;]*)s([^%w%s\\\"|].*)$")
+                if not range then
+                    return
+                end
+                local swapped = range .. "S" .. rest
+                vim.fn.setcmdline(swapped)
+                vim.schedule(function()
+                    if vim.fn.histget(":", -1) == swapped then
+                        vim.fn.histdel(":", -1)
+                        vim.fn.histadd(":", line)
+                    end
+                end)
+            end,
+        })
+    elseif opts.substitute_abbrev then
         -- Expand a lone, possibly range-prefixed :s into :S so :%s// muscle
         -- memory lands on PCRE2. Not a real abbreviation: those never fire
         -- after a range (":s/" expands, ":%s/" does not -- measured), so the

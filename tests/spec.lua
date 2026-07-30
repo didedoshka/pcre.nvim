@@ -1025,6 +1025,33 @@ end)
 -- Vim-only atoms (\zs, \ze) are the proof that the native command ran: they are
 -- errors to PCRE2. Last section on purpose -- the flag is process-global.
 
+t("s-rewrite 'enter' mode: no visible swap, pcre runs, history keeps the typed line", function()
+    ps.setup({ substitute_abbrev = "enter" })
+    local b = show({ "foo foo" })
+    local seen = {}
+    local au = vim.api.nvim_create_autocmd("CmdlineChanged", {
+        callback = function() seen[#seen + 1] = vim.fn.getcmdline() end,
+    })
+    vim.fn.feedkeys(":%s/fo(?=o)/x/g\r", "tx")
+    vim.api.nvim_del_autocmd(au)
+    eq(lines_of(b), { "xo xo" }) -- the pcre2 lookahead proves :S ran
+    assert(#seen > 0, "expected CmdlineChanged events")
+    for _, line in ipairs(seen) do
+        assert(not line:find("S", 1, true), "cmdline showed the swap: " .. line)
+    end
+    vim.wait(1000, function() return vim.fn.histget(":", -1) == "%s/fo(?=o)/x/g" end)
+    eq(vim.fn.histget(":", -1), "%s/fo(?=o)/x/g")
+    ps.setup({ substitute_abbrev = true }) -- the later tests assume the typed mode
+end)
+
+t("s-rewrite 'enter' mode: :su and a bare :s stay native", function()
+    ps.setup({ substitute_abbrev = "enter" })
+    local b = show({ "nxn" })
+    vim.fn.feedkeys(":su/n\\zs.\\zen/-/\r", "tx") -- native pattern via native :su
+    eq(lines_of(b), { "n-n" })
+    ps.setup({ substitute_abbrev = true })
+end)
+
 t("toggle: off hands / back to native", function()
     local b = show({ "n.n" })
     -- typed, not ps.toggle(): proves :Pcre reaches it and that the :s rewrite

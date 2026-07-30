@@ -4,6 +4,20 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — :s stays :s on screen (the "enter" abbrev mode)
+
+Measured: setcmdline() inside CmdlineLeave still changes what executes, so
+the :s → :S swap can happen at the <CR> and never be visible — the cmdline
+shows the typed :s all along. Two measured consequences, both handled or
+declared:
+
+- The : history records the *swapped* line; the hook drops it and re-adds
+  the typed one (vim.schedule, after the command has run).
+- While typing, 'inccommand' previews native :s reading a pcre pattern —
+  harmless (no errors, buffer intact, measured) but it is the wrong
+  engine's preview. `substitute_abbrev = true` keeps the visible swap and
+  the true pcre preview; the mode is a taste knob, not a replacement.
+
 ## 2026-07-30 — the remaining search contexts: ?, visual, o-pending, gn/gN, v_*
 
 The mechanics were all measured before coding, and they made this far
