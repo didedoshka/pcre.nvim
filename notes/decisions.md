@@ -4,6 +4,50 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — native-parity audit: fixed or declared, all measured
+
+Systematic pass comparing /, n/N, the star family and :S against native.
+Fixed to match native (each behaviour measured before coding):
+
+- Direction: a backward search (`#`) makes n continue backward and N
+  forward, the echo shows `?pat`, and v:searchforward mirrors it.
+- `[count]/pat` and `[count]n` take the count'th match.
+- `<C-g>`/`<C-t>` cycle the current match while typing ('incsearch' only);
+  accepting lands on the cycled match. Native's end-of-buffer wrap for
+  these was not headless-measurable (feedkeys swallows the keys mid-prompt),
+  so the semantics follow :h c_CTRL-G: 'wrapscan' applies.
+- While typing, the current match paints IncSearch (not CurSearch), and
+  with 'nohlsearch' only the current match paints, like native incsearch.
+- Wraps echo a right-aligned `W [x/y]` and no warning line; with
+  'shortmess' S the warning line comes back, and s silences it too.
+  SearchWrapped fires on every wrap.
+- `<C-r><C-l>` inserts the line under the cursor.
+- :S mirrors :s around the search state: owns @/ even when nothing matched,
+  relights highlights, n/N repeat it, the search history stays untouched;
+  the cursor ends on the first non-blank of the last substituted line;
+  `:S//x/` reuses the last pcre pattern; 'gdefault' inverts /g.
+
+Deviations that remain, deliberate:
+
+- Case is PCRE2's, `(?i)` inline (native / and * follow 'ignorecase') — the
+  2026-07-20 decision stands.
+- No search offsets (`/pat/e`): the whole prompt input is the pattern, so
+  `/` needs no escaping in it; adopting native's `\/` termination to make
+  room for offsets is a breaking change. Undecided, awaiting a real need.
+- :s flags beyond g/c/i (n, e, I, &, r) and the repeat family (`&`, `g&`,
+  bare `:s`) are not implemented.
+- Scope cuts stand: `?`, visual and operator-pending `/`, `gn`/`cgn`,
+  multi-line patterns.
+
+- Measured trap: nvim's default `<C-l>` runs `<Cmd>nohlsearch|...`, and a
+  `<Cmd>` mapping fires no Cmdline* events, so the :noh hook cannot see it —
+  pcre highlights survive a `<C-l>`. Unhookable plugin-side; a config that
+  uses `<C-l>` must chain pcre.clear() into its own mapping.
+- Measured trap: in the offline suite, a typed `:S` only exists after some
+  test has called `ps.setup()` (line ~810); :S tests placed earlier must
+  call `ps.setup({})` themselves or the E492 is silently swallowed by
+  feedkeys and the buffer just stays unchanged.
+
 ## 2026-07-30 — the star family is pcre too
 
 A native `*` flipped the session between two regex syntaxes: `@/` and the

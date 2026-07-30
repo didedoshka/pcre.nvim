@@ -422,6 +422,164 @@ t("n: a count jumps count matches", function()
     vim.keymap.del("n", "n")
 end)
 
+-- native parity ----------------------------------------------------------------
+
+t("direction: n after # continues backward, N forward, like native", function()
+    show({ "word a", "word b", "word c" }, { 2, 0 })
+    search.search_cword({ backward = true })
+    eq(cursor(), { 1, 0 })
+    eq(vim.v.searchforward, 0)
+    search.next() -- backward: wraps to the last occurrence
+    eq(cursor(), { 3, 0 })
+    search.prev() -- N reverses: forward, wraps to the first
+    eq(cursor(), { 1, 0 })
+end)
+
+t("echo: ? prefix after #, W [x/y] on a wrap", function()
+    local chunks
+    local real_echo = vim.api.nvim_echo
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_echo = function(c) chunks = c end
+    show({ "word a", "word b" }, { 2, 0 })
+    search.search_cword({ backward = true })
+    assert(chunks[1][1]:sub(1, 1) == "?", chunks[1][1])
+    assert(not chunks[2][1]:find("W [", 1, true), vim.inspect(chunks))
+    search.next() -- backward from the first match: wraps
+    assert(chunks[2][1]:find("W [", 1, true), vim.inspect(chunks))
+    vim.api.nvim_echo = real_echo
+end)
+
+t("echo: shortmess S shows the wrap warning, sS suppresses it", function()
+    local chunks
+    local real_echo = vim.api.nvim_echo
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.api.nvim_echo = function(c) chunks = c end
+    local sm = vim.o.shortmess
+    vim.o.shortmess = sm .. "S"
+    show({ "w1", "w2" }, { 2, 0 })
+    type_keys("w[0-9]<CR>")
+    ps.search() -- nothing strictly after (2,0): wraps to (1,0)
+    eq(chunks[1][2], "WarningMsg")
+    vim.o.shortmess = sm .. "sS"
+    search.next()
+    search.next() -- wraps again
+    eq(chunks, { { "/w[0-9]" } })
+    vim.o.shortmess = sm
+    vim.api.nvim_echo = real_echo
+end)
+
+t("SearchWrapped fires on wrap, for / and for n", function()
+    local fired = 0
+    local au = vim.api.nvim_create_autocmd("SearchWrapped",
+        { callback = function() fired = fired + 1 end })
+    show({ "z1", "z2" }, { 2, 0 })
+    type_keys("z[0-9]<CR>")
+    ps.search() -- wraps to (1,0)
+    eq(fired, 1)
+    search.next() -- (2,0), no wrap
+    eq(fired, 1)
+    search.next() -- wraps
+    eq(fired, 2)
+    vim.api.nvim_del_autocmd(au)
+end)
+
+t("search: [count]/pat accepts the count'th match", function()
+    show({ "c1 c2 c3" }, { 1, 0 })
+    vim.keymap.set("n", "/", ps.search)
+    vim.fn.feedkeys("2/c[0-9]" .. vim.keycode("<CR>"), "tx")
+    eq(cursor(), { 1, 6 })
+    vim.keymap.del("n", "/")
+end)
+
+t("search: <C-g> cycles the current match while typing", function()
+    show({ "g1", "g2", "g3" }, { 1, 0 })
+    type_keys("g[0-9]<C-g><CR>") -- current starts at (2,0), <C-g> -> (3,0)
+    ps.search()
+    eq(cursor(), { 3, 0 })
+end)
+
+t("search: <C-t> cycles back; ends clamp under 'nowrapscan'", function()
+    show({ "t1", "t2" }, { 1, 0 })
+    type_keys("t[0-9]<C-t><CR>") -- (2,0) back to (1,0)
+    ps.search()
+    eq(cursor(), { 1, 0 })
+    vim.o.wrapscan = false
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    type_keys("t[0-9]<C-t><C-t><CR>") -- second <C-t> would wrap: stays
+    ps.search()
+    eq(cursor(), { 1, 0 })
+    vim.o.wrapscan = true
+end)
+
+t("search: typing paints the current match IncSearch, the rest Search", function()
+    local b = show({ "inc1 x", "inc2" }, { 1, 5 })
+    local snap
+    vim.keymap.set("c", "<F8>", function() snap = search_marks(b) end)
+    type_keys("inc[0-9]<F8><CR>")
+    ps.search()
+    vim.keymap.del("c", "<F8>")
+    eq(snap, {
+        { 0, 0, 4, "Search" },
+        { 1, 0, 4, "IncSearch" },
+    })
+end)
+
+t("search: with 'nohlsearch' only the current match paints while typing", function()
+    vim.o.hlsearch = false
+    local b = show({ "nh1 x", "nh2" }, { 1, 5 })
+    local snap
+    vim.keymap.set("c", "<F8>", function() snap = search_marks(b) end)
+    type_keys("nh[0-9]<F8><Esc>")
+    ps.search()
+    vim.keymap.del("c", "<F8>")
+    eq(snap, { { 1, 0, 3, "IncSearch" } })
+    vim.o.hlsearch = true
+end)
+
+t("search: <C-r><C-l> inserts the line under the cursor", function()
+    show({ "lineful" }, { 1, 0 })
+    type_keys("<C-r><C-l><CR>")
+    ps.search()
+    eq(vim.fn.getreg("/"), "lineful")
+end)
+
+t(":S owns n/N and relights highlights, like native :s", function()
+    ps.setup({}) -- :S registration; idempotent for these tests
+    local b = show({ "foo bar", "foo foo" }, { 1, 0 })
+    vim.fn.feedkeys(":%S/foo/X/\r", "tx") -- first per line without /g
+    eq(lines_of(b), { "X bar", "X foo" })
+    eq(vim.fn.getreg("/"), "foo")
+    search.next() -- pcre n: the surviving foo
+    eq(cursor(), { 2, 2 })
+    assert(#search_marks(b) > 0, "expected pcre highlights after :S")
+end)
+
+t(":S with no match still owns the pattern, like native :s", function()
+    show({ "aaa" }, { 1, 0 })
+    -- the not-found notify is an error message, which raises under -l
+    pcall(vim.fn.feedkeys, ":S/zzz/x/\r", "tx")
+    eq(vim.fn.getreg("/"), "zzz")
+end)
+
+t(":S// reuses the last pcre pattern", function()
+    local b = show({ "roo koo" }, { 1, 0 })
+    type_keys("[rk]oo<CR>")
+    ps.search()
+    vim.fn.feedkeys(":S//X/g\r", "tx")
+    eq(lines_of(b), { "X X" })
+end)
+
+t("run: 'gdefault' inverts /g, like native", function()
+    vim.o.gdefault = true
+    local b = show({ "oo oo" }, { 1, 0 })
+    vim.fn.feedkeys(":S/oo/X/\r", "tx")
+    eq(lines_of(b), { "X X" }) -- g is the default now
+    local b2 = show({ "ee ee" }, { 1, 0 })
+    vim.fn.feedkeys(":S/ee/Y/g\r", "tx")
+    eq(lines_of(b2), { "Y ee" }) -- and /g turns it back off
+    vim.o.gdefault = false
+end)
+
 t("search: hlsearch off leaves no highlights after accept", function()
     vim.o.hlsearch = false
     local b = show({ "hlfoo" }, { 1, 4 })
@@ -457,13 +615,15 @@ t("parse: missing replacement deletes", function()
     eq(sub.parse("/foo"), { pat = "foo", repl = "", flags = {} })
 end)
 
-t("parse: rejects unknown flags, empty pattern, stray separator in flags", function()
+t("parse: rejects unknown flags and stray separator in flags", function()
     local _, err = sub.parse("/a/b/z")
     assert(err and err:find("unsupported"), err)
-    local _, err2 = sub.parse("//b/")
-    assert(err2 and err2:find("empty"), err2)
     local _, err3 = sub.parse("/a/b/g/x")
     assert(err3 and err3:find("unsupported"), err3)
+end)
+
+t("parse: empty pattern is legal -- :S// reuses the last search", function()
+    eq(sub.parse("//b/"), { pat = "", repl = "b", flags = {} })
 end)
 
 t("normalize_repl: adjacency, vim backrefs, literals", function()

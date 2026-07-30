@@ -3,6 +3,31 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.3 — 2026-07-30
+
+Native-parity batch — every behaviour measured against nvim first:
+
+- Backward searches set the direction: after `#`, `n` continues backward and
+  `N` forward, the echo shows `?pat`, and `v:searchforward` mirrors it.
+- `[count]/pat`, `[count]n` and `[count]*` work.
+- `<C-g>`/`<C-t>` cycle the current match while typing (`'incsearch'`);
+  accepting lands on the cycled match.
+- While typing, the current match highlights as IncSearch, and with
+  `'nohlsearch'` only the current match is painted — like native.
+- A wrapped search echoes a right-aligned `W [x/y]` instead of the warning
+  line; the `'shortmess'` S and s flags are respected; the SearchWrapped
+  autocmd fires.
+- `<C-r><C-l>` inserts the line under the cursor into the pattern.
+- `:S` handles the search state like `:s`: `@/` is set (even when nothing
+  matched), highlights relight, `n`/`N` repeat the pattern, the search
+  history stays untouched. The cursor ends on the first non-blank of the
+  last substituted line. `:S//x/` reuses the last pcre pattern, and
+  `'gdefault'` inverts `/g`.
+
+Known trap: nvim's default `<C-l>` clears native hlsearch through a `<Cmd>`
+mapping no Cmdline event can observe — chain `require("pcre").clear()` into
+your own `<C-l>` mapping if you use it.
+
 ## v0.1.2 — 2026-07-30
 
 - Star family parity fix: native `*`/`#` search from the start of the word,

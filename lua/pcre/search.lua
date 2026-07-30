@@ -15,9 +15,13 @@ local M = {}
 
 local last = nil ---@type string? last accepted pattern
 local owned = nil ---@type string? @/ as we left it, to detect a native search
+local forward = true ---@type boolean direction of the owned search (like v:searchforward)
 
----The one live (painted) search; nil = no highlights anywhere.
----@type { buf: integer, pattern: string, cur: pcre2.Match? }?
+---The one live (painted) search; nil = no highlights anywhere. prompt marks
+---the incremental preview while typing: the current match paints IncSearch
+---(not CurSearch), and the other matches only when 'hlsearch' is on -- native
+---'incsearch' behaves exactly so.
+---@type { buf: integer, pattern: string, cur: pcre2.Match?, prompt: boolean? }?
 local live = nil
 local painted = {} ---@type table<integer, integer[]> win -> matchaddpos ids
 
@@ -45,20 +49,22 @@ local function paint(win)
             pos = {}
         end
     end
-    for _, m in ipairs(matches) do
-        local lnum = top + m.lnum - 1
-        if not (cur and lnum == cur.lnum and m.scol == cur.scol) then
-            -- zero-width matches get one visible cell, like native hlsearch
-            pos[#pos + 1] = { lnum, m.scol + 1, math.max(m.ecol - m.scol, 1) }
-            if #pos == 8 then -- matchaddpos takes at most 8 positions per call
-                flush("Search", 10)
+    if not (live.prompt and not vim.o.hlsearch) then
+        for _, m in ipairs(matches) do
+            local lnum = top + m.lnum - 1
+            if not (cur and lnum == cur.lnum and m.scol == cur.scol) then
+                -- zero-width matches get one visible cell, like native hlsearch
+                pos[#pos + 1] = { lnum, m.scol + 1, math.max(m.ecol - m.scol, 1) }
+                if #pos == 8 then -- matchaddpos takes at most 8 positions per call
+                    flush("Search", 10)
+                end
             end
         end
+        flush("Search", 10)
     end
-    flush("Search", 10)
     if cur and cur.lnum >= top and cur.lnum <= bot then
         pos = { { cur.lnum, cur.scol + 1, math.max(cur.ecol - cur.scol, 1) } }
-        flush("CurSearch", 11)
+        flush(live.prompt and "IncSearch" or "CurSearch", 11)
     end
     painted[win] = ids
 end
@@ -79,10 +85,15 @@ end
 ---write @/, so ours goes there too, and vim's own highlighting goes off -- it
 ---would otherwise draw its reading of a pcre pattern on top of our matches.
 ---A later native search overwrites @/, which is how step() sees it lost n/N.
-local function own(pattern)
+---backward records the search direction: n repeats it, N reverses it, like
+---native n/N after `#` or `?` (measured), and v:searchforward mirrors it for
+---anything native that reads the variable.
+local function own(pattern, backward)
     last = pattern
+    forward = not backward
     vim.fn.setreg("/", pattern)
     vim.v.hlsearch = 0 -- setreg alone turns highlighting back on
+    vim.v.searchforward = forward and 1 or 0
     owned = vim.fn.getreg("/")
 end
 
@@ -155,16 +166,25 @@ local function echo(chunks)
     vim.api.nvim_echo(chunks, false, {})
 end
 
----The native search echo: "/pat", and a right-aligned [cur/total] like
----'shortmess' without S shows. total == nil leaves the count out.
-local function echo_search(pattern, cur, total)
-    local text = "/" .. pattern
-    local chunks = { { text } }
-    if not total then
-        echo(chunks)
+---The native search echo, all measured: the pattern prefixed with the search
+---direction (? for the # family), plus a right-aligned [cur/total] -- "W
+---[cur/total]" after a wrap -- unless 'shortmess' has S. With S the wrap
+---falls back to the old warning line, which the s flag silences in turn; the
+---warning names the jump direction, not the search's.
+local function echo_search(pattern, cur, total, wrapped, jump_backward)
+    local ss = vim.o.shortmess
+    local text = (forward and "/" or "?") .. pattern
+    if ss:find("S", 1, true) then
+        if wrapped and not ss:find("s", 1, true) then
+            echo({ { jump_backward and "search hit TOP, continuing at BOTTOM"
+                or "search hit BOTTOM, continuing at TOP", "WarningMsg" } })
+        else
+            echo({ { text } })
+        end
         return
     end
-    local count = ("[%d/%d]"):format(cur or 0, total)
+    local chunks = { { text } }
+    local count = ((wrapped and "W [%d/%d]" or "[%d/%d]")):format(cur or 0, total)
     -- keep clear of the 'showcmd' cells at the end of the last line: a message
     -- reaching into them triggers a hit-enter prompt (measured on 0.13-dev,
     -- threshold columns-12 with showcmd, columns-1 without); native search
@@ -183,11 +203,13 @@ end
 ---incremental matching (CmdlineChanged) and search history (input() would use
 ---the "@" history) are ours.
 function M.search()
+    local count = vim.v.count1 -- [count]/pat accepts the count'th match, like native
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local view = vim.fn.winsaveview()
     local matches = {} ---@type pcre2.Match[]
     local cur = nil ---@type integer?
+    local cycled = false -- <C-g>/<C-t> picked cur; accept keeps it over nearest()
     local hlsearch = vim.v.hlsearch -- native highlights, hidden while we type
     local prev_live = live -- what was painted before the prompt, for cancel
 
@@ -196,6 +218,7 @@ function M.search()
         -- a regex error mid-typing (unclosed group etc.) just means no matches yet
         matches = matches or {}
         cur = nearest(matches, view.lnum, view.col)
+        cycled = false -- the pattern changed under the cycling
         if not vim.o.incsearch then
             -- native without 'incsearch': no jump, no highlights while typing
             return
@@ -206,10 +229,33 @@ function M.search()
             vim.fn.winrestview(view)
         end
         -- empty pattern shows whatever was on screen before, like native
-        live = pattern ~= "" and { buf = buf, pattern = pattern, cur = matches[cur] }
+        live = pattern ~= ""
+            and { buf = buf, pattern = pattern, cur = matches[cur], prompt = true }
             or prev_live
         M.repaint()
         vim.cmd("redraw") -- paint under the open cmdline, like native incsearch
+    end
+
+    ---c_CTRL-G / c_CTRL-T: move the current match while typing (:h c_CTRL-G;
+    ---'incsearch' only, 'wrapscan' applies). The accepted search lands on the
+    ---cycled match instead of the one nearest the origin.
+    local function cycle(delta)
+        if not vim.o.incsearch or not cur then
+            return
+        end
+        local idx = cur + delta
+        if idx < 1 or idx > #matches then
+            if not vim.o.wrapscan then
+                return
+            end
+            idx = (idx - 1) % #matches + 1
+        end
+        cur = idx
+        cycled = true
+        vim.api.nvim_win_set_cursor(win, { matches[cur].lnum, matches[cur].scol })
+        live = { buf = buf, pattern = vim.fn.getcmdline(), cur = matches[cur], prompt = true }
+        M.repaint()
+        vim.cmd("redraw")
     end
 
     ---@param keep_live boolean put the pre-prompt highlights back (plain
@@ -268,6 +314,8 @@ function M.search()
         ["<C-p>"] = function() hist_move(1) end,
         ["<Down>"] = function() hist_move(-1) end,
         ["<C-n>"] = function() hist_move(-1) end,
+        ["<C-g>"] = function() cycle(1) end,
+        ["<C-t>"] = function() cycle(-1) end,
         -- backspace past an empty pattern leaves the search, like native "/"
         -- (input() would just sit there). <C-c>, not <Esc>: an <Esc> coming
         -- from a mapping executes the cmdline instead of quitting (:h c_<Esc>)
@@ -285,6 +333,8 @@ function M.search()
                 insert_cursor_text("<cword>")
             elseif reg == vim.keycode("<C-a>") then
                 insert_cursor_text("<cWORD>")
+            elseif reg == vim.keycode("<C-l>") then
+                insert_at_cmdpos(vim.api.nvim_get_current_line())
             elseif #reg == 1 then
                 insert_at_cmdpos((vim.fn.getreg(reg):gsub("\n", " ")))
             end
@@ -326,11 +376,25 @@ function M.search()
     end
     vim.fn.histadd("search", pattern)
     matches = M.find(buf, pattern) or {}
-    cur = nearest(matches, view.lnum, view.col)
+    local wrapped = false
+    if not cycled then -- a <C-g>/<C-t> pick beats the origin-nearest match
+        cur = nil
+        local lnum, col = view.lnum, view.col
+        for _ = 1, count do
+            local w
+            cur, w = nearest(matches, lnum, col)
+            if not cur then
+                break
+            end
+            wrapped = wrapped or w
+            lnum, col = matches[cur].lnum, matches[cur].scol
+        end
+    end
     if not cur then
         cancel(false)
         own(pattern) -- after cancel(): a failed search still owns n/N
-        echo({ { "E486: Pattern not found: " .. pattern, "ErrorMsg" } })
+        echo({ { #matches > 0 and "E385: search hit BOTTOM without match for: " .. pattern
+            or "E486: Pattern not found: " .. pattern, "ErrorMsg" } })
         return
     end
     own(pattern)
@@ -339,7 +403,10 @@ function M.search()
     jump(win, m)
     live = vim.o.hlsearch and { buf = buf, pattern = pattern, cur = m } or nil
     M.repaint()
-    echo_search(pattern, cur, #matches)
+    if wrapped then
+        vim.api.nvim_exec_autocmds("SearchWrapped", {})
+    end
+    echo_search(pattern, cur, #matches, wrapped, false)
 end
 
 ---Jump to the [count]th nearest match of pat, from the cursor (n/N) or from
@@ -374,11 +441,9 @@ local function goto_nearest(pat, backward, count, from)
     end
     M.repaint()
     if wrapped then
-        echo({ { backward and "search hit TOP, continuing at BOTTOM"
-            or "search hit BOTTOM, continuing at TOP", "WarningMsg" } })
-    else
-        echo_search(pat, idx, #matches)
+        vim.api.nvim_exec_autocmds("SearchWrapped", {})
     end
+    echo_search(pat, idx, #matches, wrapped, backward)
 end
 
 local function step(backward)
@@ -394,7 +459,9 @@ local function step(backward)
         end
         return
     end
-    goto_nearest(pat, backward, count)
+    -- n repeats the search direction, N reverses it: after a backward search
+    -- (#) they swap, like native (measured)
+    goto_nearest(pat, backward == forward, count)
 end
 
 ---Next match of the last search (an "n" mapping).
@@ -452,7 +519,7 @@ function M.search_cword(opts)
         return
     end
     vim.fn.histadd("search", pat)
-    own(pat)
+    own(pat, opts.backward)
     -- native * and # search from the start of the word, not from the cursor:
     -- measured, * on the whitespace before a word skips that word, and # from
     -- mid-word skips the current occurrence. So the origin is the match
@@ -467,6 +534,22 @@ function M.search_cword(opts)
         end
     end
     goto_nearest(pat, opts.backward or false, count, from)
+end
+
+---A pattern accepted outside the prompt: ":S" owns the search the way native
+---":s" does (measured) -- @/ is set even when nothing matched, highlights
+---relight, n/N repeat it forward, nothing lands in the search history.
+function M.adopt(pattern)
+    own(pattern)
+    live = vim.o.hlsearch
+        and { buf = vim.api.nvim_get_current_buf(), pattern = pattern } or nil
+    M.repaint()
+end
+
+---The owned pcre pattern, or nil once a native search took @/ over (":S//"
+---reuses it, like native ":s//" reuses the last search pattern).
+function M.last_pattern()
+    return pcre_last()
 end
 
 return M

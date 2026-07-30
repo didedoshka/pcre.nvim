@@ -153,6 +153,27 @@ t("star from the whitespace before a word matches native (skips that word)", fun
     eq(cursor(), native)
 end)
 
+t("n/N after # match native: the direction reverses", function()
+    local lines = { "word a", "word b", "word c" }
+    local function walk(hash, nextfn, prevfn)
+        show(lines, { 2, 0 })
+        hash()
+        local traj = { cursor() }
+        nextfn()
+        traj[#traj + 1] = cursor()
+        nextfn()
+        traj[#traj + 1] = cursor()
+        prevfn()
+        traj[#traj + 1] = cursor()
+        return traj
+    end
+    local native = walk(function() vim.cmd("normal! #") end,
+        function() vim.cmd("normal! n") end, function() vim.cmd("normal! N") end)
+    local ours = walk(function() search.search_cword({ backward = true }) end,
+        search.next, search.prev)
+    eq(ours, native)
+end)
+
 t("# from mid-word matches native (skips the current occurrence)", function()
     local lines = { "word x", "y word z", "word" }
     show(lines, { 2, 4 })

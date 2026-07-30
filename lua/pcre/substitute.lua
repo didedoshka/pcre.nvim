@@ -2,6 +2,7 @@
 -- expands the replacement per match (pcre2_substitute against the live match
 -- data), so positions and expansions can never disagree.
 local pcre2 = require("pcre.pcre2")
+local search = require("pcre.search")
 
 local M = {}
 
@@ -35,9 +36,7 @@ function M.parse(args)
             i = i + 1
         end
     end
-    if parts[1] == "" then
-        return nil, "empty pattern"
-    end
+    -- an empty pattern is legal: run/preview resolve it to the last search
     local flags = {}
     for f in (parts[3] or ""):gmatch(".") do
         if not ("gci"):find(f, 1, true) then
@@ -95,11 +94,13 @@ function M.compute(buf, line1, line2, spec)
     if not matches then
         return nil, err
     end
+    -- 'gdefault' inverts the /g flag, like native :s
+    local all = (spec.flags.g or false) ~= vim.o.gdefault
     local edits = {}
     local seen = {} ---@type table<integer, true> lines that already have an edit
     for _, m in ipairs(matches) do
         -- vim semantics: without /g only the first match on each line
-        if spec.flags.g or not seen[m.lnum] then
+        if all or not seen[m.lnum] then
             if m.text:find("\n", 1, true) then
                 -- everything downstream (spans, preview) assumes one-line texts
                 return nil, "replacement expanded to multiple lines; not supported"
@@ -148,7 +149,10 @@ local function apply(buf, win, edits)
         end
     end
     if win then
-        vim.api.nvim_win_set_cursor(win, { edits[#edits].lnum, edits[#edits].scol })
+        -- native :s ends on the first non-blank of the last substituted line
+        -- (measured), not on the substitution itself
+        vim.api.nvim_win_set_cursor(win, { edits[#edits].lnum, 0 })
+        vim.cmd("normal! ^")
     end
     if nlines > vim.o.report then
         vim.api.nvim_echo({ { ("%d substitution%s on %d line%s"):format(
@@ -201,12 +205,24 @@ function M.run(o)
     if not spec then
         return vim.notify(perr, vim.log.levels.ERROR)
     end
+    if spec.pat == "" then
+        -- native :s// substitutes the last search pattern
+        local prev = search.last_pattern()
+        if not prev then
+            return vim.notify("E35: No previous regular expression", vim.log.levels.ERROR)
+        end
+        spec.pat = prev
+    end
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local edits, cerr = M.compute(buf, o.line1, o.line2, spec)
     if not edits then
         return vim.notify(cerr or "PCRE2 failed", vim.log.levels.ERROR)
     end
+    -- native :s owns the search even when nothing matched (measured): @/ is
+    -- set, hlsearch relights, n repeats the pattern -- and the search
+    -- history stays untouched
+    search.adopt(spec.pat)
     if #edits == 0 then
         return vim.notify("Pattern not found: " .. spec.pat, vim.log.levels.ERROR)
     end
@@ -224,6 +240,12 @@ function M.preview(o, preview_ns, preview_buf)
     local spec = M.parse(o.args)
     if not spec then
         return 0
+    end
+    if spec.pat == "" then
+        spec.pat = search.last_pattern() or ""
+        if spec.pat == "" then
+            return 0
+        end
     end
     local buf = vim.api.nvim_get_current_buf()
     local ok, edits = pcall(M.compute, buf, o.line1, o.line2, spec)
