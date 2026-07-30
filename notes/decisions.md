@@ -4,6 +4,29 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — the remaining search contexts: ?, visual, o-pending, gn/gN, v_*
+
+The mechanics were all measured before coding, and they made this far
+cheaper than feared:
+
+- `vim.fn.input()` inside a visual-mode mapping keeps the selection alive:
+  the prompt extends it live while typing, nothing to save or restore.
+- In an operator-pending lua mapping, moving the cursor IS the motion
+  (exclusive, like native d/), and input() works there too — no g@ dance.
+- An o-pending mapping that makes a charwise visual selection has the
+  operator apply to it inclusively, and `.` re-fires the mapping — exactly
+  cgn's contract, so dot-repeat walks successive matches for free.
+- Native gn selects the covering match, anchor on its start; gN mirrors it,
+  anchor on the end. In visual mode both move the cursor to the far edge
+  strictly past it (a cursor already on an edge goes to the next match).
+- v_* is an nvim default (literal \V pattern, from the selection start,
+  selection dropped). A multi-line selection is native-supported (\Vab\nc)
+  but refused here: the engine matches line by line — the standing scope cut.
+- Measured trap: v:count persists after a completed `:normal` command — a
+  direct search_selection() call right after `normal! v2l` still sees
+  count=2 and jumps twice. Only test code can hit this; a real mapping's
+  count is its own.
+
 ## 2026-07-30 — native-parity audit: fixed or declared, all measured
 
 Systematic pass comparing /, n/N, the star family and :S against native.

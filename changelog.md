@@ -3,6 +3,25 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.4 — 2026-07-30
+
+The remaining native search contexts, all PCRE now — multi-line patterns
+stay the one scope cut:
+
+- `?`, the backward prompt: `search({ backward = true })`. Counts, n/N
+  direction, `<C-g>`/`<C-t>` (cycling backward, like native), the W [x/y]
+  echo — everything mirrored.
+- Visual `/` and `?` extend the selection to the match, live while typing.
+- Operator-pending `/` and `?`: `d/pat<CR>` is an exclusive motion, native
+  semantics in both directions.
+- `gn`/`gN` (`select_match({ backward? })`): select the covering match, else
+  the next in the search direction; in visual mode extend to the match edge;
+  `cgn` + `.` walks successive matches exactly like native. Falls through to
+  native gn/gN when no pcre search is owned.
+- Visual `*`/`#` (`search_selection({ backward? })`): literal search for the
+  selection, like nvim's default v_*, pcre-escaped; a multi-line selection
+  is refused.
+
 ## v0.1.3 — 2026-07-30
 
 Native-parity batch — every behaviour measured against nvim first:

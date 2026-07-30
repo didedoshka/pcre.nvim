@@ -184,6 +184,79 @@ t("# from mid-word matches native (skips the current occurrence)", function()
     eq(cursor(), native)
 end)
 
+t("d/pat and d?pat match native", function()
+    local lines = { "abc foo xyz foo", "foo tail" }
+    local nb = show(lines, { 1, 0 })
+    vim.fn.feedkeys("d/foo\r", "x")
+    local nfwd = lines_of(nb)
+    nb = show(lines, { 1, 8 })
+    vim.fn.feedkeys("d?foo\r", "x")
+    local nback = lines_of(nb)
+    local ob = show(lines, { 1, 0 })
+    vim.keymap.set("o", "/", ps.search)
+    vim.keymap.set("o", "?", function() ps.search({ backward = true }) end)
+    vim.fn.feedkeys("d/foo" .. vim.keycode("<CR>"), "tx")
+    eq(lines_of(ob), nfwd)
+    ob = show(lines, { 1, 8 })
+    vim.fn.feedkeys("d?foo" .. vim.keycode("<CR>"), "tx")
+    eq(lines_of(ob), nback)
+    vim.keymap.del("o", "/")
+    vim.keymap.del("o", "?")
+end)
+
+t("gn and gN selections match native", function()
+    local lines = { "afoob x foo", "foo" }
+    local function sel()
+        local v, c = vim.fn.getpos("v"), cursor()
+        vim.fn.feedkeys(vim.keycode("<Esc>"), "x")
+        return { vim.fn.mode(), v[2], v[3], c }
+    end
+    local native = {}
+    for i, key in ipairs({ "gn", "gN" }) do
+        show(lines, { 1, 2 })
+        vim.fn.setreg("/", "foo")
+        vim.fn.feedkeys(vim.keycode(key), "x")
+        native[i] = sel()
+    end
+    for i, backward in ipairs({ false, true }) do
+        show(lines, { 1, 0 })
+        type_keys("foo<CR>")
+        ps.search()
+        vim.api.nvim_win_set_cursor(0, { 1, 2 })
+        search.select_match({ backward = backward })
+        eq(sel(), native[i])
+    end
+end)
+
+t("cgn + dot matches native", function()
+    local lines = { "foo foo foo" }
+    local nb = show(lines, { 1, 0 })
+    vim.fn.setreg("/", "foo")
+    vim.fn.feedkeys(vim.keycode("cgnbar<Esc>"), "x")
+    vim.fn.feedkeys(".", "x")
+    local native = lines_of(nb)
+    local ob = show(lines, { 1, 0 })
+    type_keys("foo<CR>")
+    ps.search()
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.keymap.set("o", "gn", search.select_match)
+    vim.fn.feedkeys("cgnbar" .. vim.keycode("<Esc>"), "tx")
+    vim.fn.feedkeys(".", "tx")
+    vim.keymap.del("o", "gn")
+    eq(lines_of(ob), native)
+end)
+
+t("visual * lands where native does", function()
+    local lines = { "ab cd ab x", "ab" }
+    show(lines, { 1, 0 })
+    vim.fn.feedkeys(vim.keycode("vl*"), "x") -- nvim's default v_*
+    local native = cursor()
+    show(lines, { 1, 0 })
+    vim.cmd("normal! vl")
+    search.search_selection()
+    eq(cursor(), native)
+end)
+
 t(":S output equals :s for /g, first-per-line, range and /i", function()
     local cases = {
         { spec = "/foo/X/g", range = { 1, 7 } },

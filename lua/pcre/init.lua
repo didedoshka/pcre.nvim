@@ -35,14 +35,39 @@ function M.toggle()
     vim.api.nvim_echo({ { "pcre " .. (enabled and "on" or "off") } }, false, {})
 end
 
----The "/" mapping.
-function M.search()
+---The "/" and "?" mappings (normal, visual and operator-pending mode alike:
+---the prompt keeps a visual selection alive, and in operator-pending mode
+---the accepted jump is the motion).
+---@param opts? pcre.DirOpts
+function M.search(opts)
     if not enabled then
         -- "n": the "/" mapping itself must not fire again
-        vim.api.nvim_feedkeys("/", "n", false)
+        vim.api.nvim_feedkeys((opts or {}).backward and "?" or "/", "n", false)
         return
     end
-    search.search()
+    search.search(opts)
+end
+
+---The "gn"/"gN" mappings.
+---@param opts? pcre.DirOpts
+function M.select_match(opts)
+    if not enabled then
+        local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+        vim.api.nvim_feedkeys(count .. ((opts or {}).backward and "gN" or "gn"), "n", false)
+        return
+    end
+    search.select_match(opts)
+end
+
+---The visual-mode "*"/"#" mappings.
+---@param opts? pcre.DirOpts
+function M.search_selection(opts)
+    if not enabled then
+        local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+        vim.api.nvim_feedkeys(count .. ((opts or {}).backward and "#" or "*"), "n", false)
+        return
+    end
+    search.search_selection(opts)
 end
 
 ---The "*"/"#"/"g*"/"g#" mappings: pcre search for the word under the cursor.

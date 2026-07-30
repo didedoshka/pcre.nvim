@@ -10,6 +10,7 @@
 -- per window and viewport-only, repainted on scroll/resize/switch/edit, so its
 -- cost tracks the screen, never the match count.
 local pcre2 = require("pcre.pcre2")
+local bit = require("bit")
 
 local M = {}
 
@@ -202,7 +203,12 @@ end
 ---takes the ci cursor shape (measured; two earlier attempts). Only the
 ---incremental matching (CmdlineChanged) and search history (input() would use
 ---the "@" history) are ours.
-function M.search()
+---@class pcre.DirOpts
+---@field backward? boolean the "?"/"#"/"gN" flavour of the mapping
+
+---@param opts? pcre.DirOpts backward is the "?" prompt
+function M.search(opts)
+    local backward = (opts or {}).backward or false
     local count = vim.v.count1 -- [count]/pat accepts the count'th match, like native
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
@@ -217,7 +223,7 @@ function M.search()
         matches = pattern ~= "" and M.find(buf, pattern) or {}
         -- a regex error mid-typing (unclosed group etc.) just means no matches yet
         matches = matches or {}
-        cur = nearest(matches, view.lnum, view.col)
+        cur = nearest(matches, view.lnum, view.col, backward)
         cycled = false -- the pattern changed under the cycling
         if not vim.o.incsearch then
             -- native without 'incsearch': no jump, no highlights while typing
@@ -237,13 +243,14 @@ function M.search()
     end
 
     ---c_CTRL-G / c_CTRL-T: move the current match while typing (:h c_CTRL-G;
-    ---'incsearch' only, 'wrapscan' applies). The accepted search lands on the
-    ---cycled match instead of the one nearest the origin.
+    ---'incsearch' only, 'wrapscan' applies). <C-g> follows the search
+    ---direction, so it cycles backward under a "?" prompt. The accepted
+    ---search lands on the cycled match instead of the one nearest the origin.
     local function cycle(delta)
         if not vim.o.incsearch or not cur then
             return
         end
-        local idx = cur + delta
+        local idx = cur + (backward and -delta or delta)
         if idx < 1 or idx > #matches then
             if not vim.o.wrapscan then
                 return
@@ -356,7 +363,8 @@ function M.search()
     vim.v.hlsearch = 0
     update("")
     -- cancelreturn must be impossible to type; \1 can't land in a pattern
-    local ok_in, pattern = pcall(vim.fn.input, { prompt = "/", cancelreturn = "\1" })
+    local ok_in, pattern = pcall(vim.fn.input,
+        { prompt = backward and "?" or "/", cancelreturn = "\1" })
     vim.paste = saved_paste
     for lhs in pairs(cmaps) do
         pcall(vim.keymap.del, "c", lhs)
@@ -382,7 +390,7 @@ function M.search()
         local lnum, col = view.lnum, view.col
         for _ = 1, count do
             local w
-            cur, w = nearest(matches, lnum, col)
+            cur, w = nearest(matches, lnum, col, backward)
             if not cur then
                 break
             end
@@ -392,12 +400,16 @@ function M.search()
     end
     if not cur then
         cancel(false)
-        own(pattern) -- after cancel(): a failed search still owns n/N
-        echo({ { #matches > 0 and "E385: search hit BOTTOM without match for: " .. pattern
-            or "E486: Pattern not found: " .. pattern, "ErrorMsg" } })
+        own(pattern, backward) -- after cancel(): a failed search still owns n/N
+        local msg = "E486: Pattern not found: " .. pattern
+        if #matches > 0 then -- only a count under 'nowrapscan' can exhaust them
+            msg = (backward and "E384: search hit TOP without match for: "
+                or "E385: search hit BOTTOM without match for: ") .. pattern
+        end
+        echo({ { msg, "ErrorMsg" } })
         return
     end
-    own(pattern)
+    own(pattern, backward)
     local m = matches[cur]
     vim.fn.winrestview(view) -- jump from the origin, so m' lands there
     jump(win, m)
@@ -406,7 +418,7 @@ function M.search()
     if wrapped then
         vim.api.nvim_exec_autocmds("SearchWrapped", {})
     end
-    echo_search(pattern, cur, #matches, wrapped, false)
+    echo_search(pattern, cur, #matches, wrapped, backward)
 end
 
 ---Jump to the [count]th nearest match of pat, from the cursor (n/N) or from
@@ -534,6 +546,151 @@ function M.search_cword(opts)
         end
     end
     goto_nearest(pat, opts.backward or false, count, from)
+end
+
+---Byte column of the last character of match m on line (multibyte-safe, the
+---same continuation-byte walk as pcre2.find); a zero-width match gets one
+---cell, like everywhere else.
+local function match_end_col(line, m)
+    local col = math.max(m.ecol - 1, m.scol)
+    while col > m.scol and bit.band(line:byte(col + 1) or 0, 0xC0) == 0x80 do
+        col = col - 1
+    end
+    return col
+end
+
+local function line_of(buf, lnum)
+    return vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or ""
+end
+
+---Advance idx count-1 steps through matches in the search direction, wrapping
+---per 'wrapscan'; nil when the count runs off an edge without it.
+local function advance(matches, idx, count, backward)
+    local step_ = backward and -1 or 1
+    for _ = 2, count do
+        local nxt = idx + step_
+        if nxt < 1 or nxt > #matches then
+            if not vim.o.wrapscan then
+                return nil
+            end
+            nxt = (nxt - 1) % #matches + 1
+        end
+        idx = nxt
+    end
+    return idx
+end
+
+---gn/gN: operate on the last search's match. Normal and operator-pending
+---mode select the match under the cursor, else the next one in the search
+---direction, as a charwise visual selection -- an operator then applies to
+---it, and "." re-fires this mapping on the following match, which is exactly
+---native cgn (measured). Visual mode moves the cursor to the match edge
+---strictly past it in the direction, extending the selection (measured on
+---native v_gn/v_gN). With no pcre search owned, falls through to native.
+---@param opts? pcre.DirOpts
+function M.select_match(opts)
+    opts = opts or {}
+    local backward = opts.backward or false
+    local count = vim.v.count1
+    local pat = pcre_last()
+    if not pat then
+        -- native gn reads @/ with vim's own engine
+        local ok, err = pcall(vim.cmd.normal, { backward and "gN" or "gn", bang = true })
+        if not ok then
+            echo({ { tostring(err):gsub("^.*Vim%(normal%):", ""), "ErrorMsg" } })
+        end
+        return
+    end
+    local buf = vim.api.nvim_get_current_buf()
+    local win = vim.api.nvim_get_current_win()
+    local matches = M.find(buf, pat)
+    if not matches or #matches == 0 then
+        echo({ { "E486: Pattern not found: " .. pat, "ErrorMsg" } })
+        return
+    end
+    local pos = vim.api.nvim_win_get_cursor(win)
+    local idx
+    if vim.fn.mode(true):match("^[vV\22]") then
+        -- the far edge strictly past the cursor: a cursor already sitting on
+        -- a match's edge extends to the next match, like native
+        if backward then
+            for i = #matches, 1, -1 do
+                local m = matches[i]
+                if m.lnum < pos[1] or (m.lnum == pos[1] and m.scol < pos[2]) then
+                    idx = i
+                    break
+                end
+            end
+        else
+            for i, m in ipairs(matches) do
+                if m.lnum > pos[1] or (m.lnum == pos[1]
+                        and match_end_col(line_of(buf, m.lnum), m) > pos[2]) then
+                    idx = i
+                    break
+                end
+            end
+        end
+        idx = idx or (vim.o.wrapscan and (backward and #matches or 1) or nil)
+        idx = idx and advance(matches, idx, count, backward)
+        if not idx then
+            return
+        end
+        local m = matches[idx]
+        local col = backward and m.scol or match_end_col(line_of(buf, m.lnum), m)
+        vim.api.nvim_win_set_cursor(win, { m.lnum, col })
+    else
+        -- normal / operator-pending: the covering match, else the nearest one
+        for i, m in ipairs(matches) do
+            if m.lnum == pos[1] and m.scol <= pos[2]
+                and pos[2] < math.max(m.ecol, m.scol + 1) then
+                idx = i
+                break
+            end
+        end
+        idx = idx or nearest(matches, pos[1], pos[2], backward)
+        idx = idx and advance(matches, idx, count, backward)
+        if not idx then
+            echo({ { backward and "E384: search hit TOP without match for: " .. pat
+                or "E385: search hit BOTTOM without match for: " .. pat, "ErrorMsg" } })
+            return
+        end
+        local m = matches[idx]
+        -- gN anchors at the match end with the cursor on its start (measured)
+        local head, tail = m.scol, match_end_col(line_of(buf, m.lnum), m)
+        if backward then
+            head, tail = tail, head
+        end
+        vim.cmd("normal! m'") -- gn is a jump, like n
+        vim.api.nvim_win_set_cursor(win, { m.lnum, head })
+        vim.cmd("normal! v")
+        vim.api.nvim_win_set_cursor(win, { m.lnum, tail })
+    end
+    live = vim.o.hlsearch and { buf = buf, pattern = pat, cur = matches[idx] } or nil
+    M.repaint()
+end
+
+---The visual "*"/"#" (nvim's default v_star): search for the selection as
+---literal text, from the selection start, leaving visual mode -- all like
+---native (measured), except the pattern is a pcre escape instead of \V, and
+---a multi-line selection is refused (the engine matches line by line).
+---@param opts? pcre.DirOpts
+function M.search_selection(opts)
+    opts = opts or {}
+    local count = vim.v.count1
+    local vpos = vim.fn.getpos("v")
+    local cpos = vim.fn.getpos(".")
+    local region = vim.fn.getregion(vpos, cpos, { type = vim.fn.mode() })
+    vim.cmd([[execute "normal! \<Esc>"]]) -- native v_* drops the selection
+    if #region ~= 1 then
+        echo({ { "pcre: multi-line selection search is not supported", "ErrorMsg" } })
+        return
+    end
+    local first = (vpos[2] < cpos[2] or (vpos[2] == cpos[2] and vpos[3] <= cpos[3]))
+        and vpos or cpos
+    local pat = pcre_escape(region[1])
+    vim.fn.histadd("search", pat)
+    own(pat, opts.backward)
+    goto_nearest(pat, opts.backward or false, count, { first[2], first[3] - 1 })
 end
 
 ---A pattern accepted outside the prompt: ":S" owns the search the way native
