@@ -143,6 +143,16 @@ function M.setup(opts)
         -- (measured), so the typed one is put back once the command has run.
         -- While the :s is being typed, substitute.live_preview renders the
         -- pcre preview without ever touching the buffer.
+        -- 'inccommand' parks at CmdlineEnter: once the native preview has
+        -- engaged, writing the option raises E474 (measured in a real UI)
+        vim.api.nvim_create_autocmd("CmdlineEnter", {
+            group = agroup,
+            callback = function()
+                if enabled and vim.fn.getcmdtype() == ":" then
+                    substitute.park_preview()
+                end
+            end,
+        })
         vim.api.nvim_create_autocmd("CmdlineChanged", {
             group = agroup,
             callback = function()
@@ -156,6 +166,7 @@ function M.setup(opts)
             group = agroup,
             callback = function()
                 substitute.live_stop()
+                substitute.unpark_preview()
                 if not enabled or vim.v.event.cmdtype ~= ":" or vim.v.event.abort then
                     return
                 end
@@ -167,6 +178,7 @@ function M.setup(opts)
                     return
                 end
                 local swapped = range .. "S" .. rest
+                substitute.pending_typed = line
                 vim.fn.setcmdline(swapped)
                 vim.schedule(function()
                     if vim.fn.histget(":", -1) == swapped then

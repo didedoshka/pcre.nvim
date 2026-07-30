@@ -3,6 +3,19 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.7 — 2026-07-30
+
+Battle-testing fixes for the "enter" mode, all verified screen-vs-screen
+against native in a driven real UI:
+
+- E474 crash typing `:s/` fixed: 'inccommand' now parks at CmdlineEnter —
+  once the native preview engages (a bare `:s` is already previewable when
+  a previous substitute exists), the option refuses writes. A directly
+  typed `:S` is covered by the live preview while parked.
+- The after-`<CR>` row matches native: the report message survives redraws,
+  its threshold is the substitution count (not lines), and below it the
+  typed `:s` line is repainted where the swapped `:%S` used to linger.
+
 ## v0.1.6 — 2026-07-30
 
 - The "enter" abbrev mode now has a live PCRE preview while the `:s` is being

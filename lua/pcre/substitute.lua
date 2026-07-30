@@ -154,10 +154,16 @@ local function apply(buf, win, edits)
         vim.api.nvim_win_set_cursor(win, { edits[#edits].lnum, 0 })
         vim.cmd("normal! ^")
     end
-    if nlines > vim.o.report then
+    -- native's threshold is the substitution count, not the line count:
+    -- measured on a real UI screen, 3 subs on 1 line reports at report=2
+    local reported = #edits > vim.o.report
+    if reported then
+        -- history: a real message like native's, retained across redraws --
+        -- a plain echo would lose to the leftover cmdline text (measured)
         vim.api.nvim_echo({ { ("%d substitution%s on %d line%s"):format(
-            #edits, #edits == 1 and "" or "s", nlines, nlines == 1 and "" or "s") } }, false, {})
+            #edits, #edits == 1 and "" or "s", nlines, nlines == 1 and "" or "s") } }, true, {})
     end
+    return reported
 end
 
 ---The [c] flag: mark each match, ask y/n/a/q/l, return the accepted subset.
@@ -202,16 +208,46 @@ end
 local ns_live = vim.api.nvim_create_namespace("pcre.live_preview")
 
 ---Live-preview state for one cmdline session; nil when inactive.
----@type { buf: integer, incc: string, wins: table<integer, { cl: integer, cc: string }> }?
+---@type { buf: integer, wins: table<integer, { cl: integer, cc: string }> }?
 local lp = nil
 
----Park native 'inccommand' -- it edits the buffer for real and would fight
----our render (nvim restores the option at CmdlineLeave on its own, measured;
----we restore it too for the mid-session case) -- and force conceal rendering
----in every window showing buf.
+---'inccommand' as it was before the ":" session, while parked; nil otherwise.
+local parked = nil ---@type string?
+
+---Park native 'inccommand' for the whole ":" session (a CmdlineEnter hook).
+---It must happen before anything engages the native preview: once engaged,
+---writing the option raises E474 -- measured in a real UI (a bare :s with a
+---previous substitute is already previewable, so the machinery engages one
+---keystroke before the first separator); headless never engages it, which
+---hid this from the suite. While parked, live_preview is the only preview,
+---and it covers a directly typed :S too.
+function M.park_preview()
+    if parked == nil then
+        parked = vim.o.inccommand
+        if parked ~= "" then
+            vim.o.inccommand = ""
+        end
+    end
+end
+
+---Undo park_preview (a CmdlineLeave hook). If nvim still holds the preview
+---lock at that instant, retry once the command has finished.
+function M.unpark_preview()
+    if parked == nil then
+        return
+    end
+    local v = parked
+    parked = nil
+    if v ~= "" and not pcall(function() vim.o.inccommand = v end) then
+        vim.schedule(function()
+            vim.o.inccommand = v
+        end)
+    end
+end
+
+---Force conceal rendering in every window showing buf.
 local function lp_start(buf)
-    lp = { buf = buf, incc = vim.o.inccommand, wins = {} }
-    vim.o.inccommand = ""
+    lp = { buf = buf, wins = {} }
     for _, win in ipairs(vim.api.nvim_list_wins()) do
         if vim.api.nvim_win_get_buf(win) == buf then
             lp.wins[win] = { cl = vim.wo[win].conceallevel, cc = vim.wo[win].concealcursor }
@@ -221,7 +257,7 @@ local function lp_start(buf)
     end
 end
 
----Tear the live preview down: marks off, options back, native preview back.
+---Tear the live preview down: marks off, window options back.
 function M.live_stop()
     if not lp then
         return
@@ -229,7 +265,6 @@ function M.live_stop()
     if vim.api.nvim_buf_is_valid(lp.buf) then
         vim.api.nvim_buf_clear_namespace(lp.buf, ns_live, 0, -1)
     end
-    vim.o.inccommand = lp.incc
     for win, saved in pairs(lp.wins) do
         if vim.api.nvim_win_is_valid(win) then
             vim.wo[win].conceallevel = saved.cl
@@ -265,12 +300,14 @@ end
 ---so undo, marks and 'modified' cannot be harmed, by construction.
 ---@param line string the current cmdline
 function M.live_preview(line)
-    local range, rest = line:match("^(%s*[%d%%,%.%$<>'+%-;]*)s([^%w%s\\\"|].*)$")
+    -- [sS]: a directly typed :S previews here too, since the official
+    -- 'inccommand' preview is parked for the session
+    local range, rest = line:match("^(%s*[%d%%,%.%$<>'+%-;]*)[sS]([^%w%s\\\"|].*)$")
     if not range then
-        M.live_stop() -- not (or no longer) a :s -- hand the session back
+        M.live_stop() -- not (or no longer) a substitute -- drop the render
         return
     end
-    if not lp and vim.o.inccommand == "" then
+    if not lp and (parked or vim.o.inccommand) == "" then
         return -- the user runs without preview; keep it that way
     end
     local buf = vim.api.nvim_get_current_buf()
@@ -323,8 +360,16 @@ function M.live_preview(line)
     vim.cmd("redraw")
 end
 
+---The :s line as the user typed it, handed over by the "enter" swap: after
+---the run, the closed cmdline would retain the swapped :%S text on screen,
+---so the typed line is repainted over it (transient, like the native
+---remnant) unless a report message took the row.
+M.pending_typed = nil ---@type string?
+
 ---:S implementation (the user command callback).
 function M.run(o)
+    local typed = M.pending_typed
+    M.pending_typed = nil
     local spec, perr = M.parse(o.args)
     if not spec then
         return vim.notify(perr, vim.log.levels.ERROR)
@@ -356,7 +401,13 @@ function M.run(o)
             return
         end
     end
-    apply(buf, win, edits)
+    local reported = apply(buf, win, edits)
+    if typed and not reported then
+        -- scheduled: nvim paints the leftover cmdline after run() returns
+        vim.schedule(function()
+            vim.api.nvim_echo({ { ":" .. typed } }, false, {})
+        end)
+    end
 end
 
 ---'inccommand' preview for :S -- vim's own live-preview machinery does the rest.

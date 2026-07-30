@@ -20,17 +20,30 @@ replace a builtin command's preview. Reimplementation candidates, measured:
   shorter *and* longer replacements, exactly like the real edit, including
   with the cmdline open. Undo, marks, 'modified', changedtick: untouched by
   construction.
-- Native 'inccommand' must be parked for the session or it edits the buffer
-  for real underneath: setting it to "" inside CmdlineChanged suppresses the
-  same keystroke's native preview (measured: changedtick never moves), and
-  nvim restores the option itself at CmdlineLeave (measured) — teardown
-  restores it too for the mid-session unmatch case.
+- Native 'inccommand' must be parked or it edits the buffer for real
+  underneath — and the parking must happen at **CmdlineEnter**: once the
+  native preview has engaged, writing the option raises E474. Measured only
+  in a real UI (battle-testing found it): a bare `:s` with a previous
+  substitute is already previewable, so the machinery engages one keystroke
+  before the first separator; headless never engages it, which hid this from
+  the suite. Unparked at CmdlineLeave (pcall + scheduled retry). While
+  parked, live_preview covers a directly typed :S too, since the official
+  :S preview can't run.
 - Approximation, declared: the pattern-phase highlight group is `Search`
   (native's exact group unverified — cosmetic); `inccommand=split`'s preview
   window is not reproduced, matches on screen are the preview.
 - Measured trap (tests): feedkeys("x") force-closes a drained cmdline like
   <Esc>, so mid-session state must be asserted from a CmdlineChanged
   autocmd registered after the plugin's, never after feedkeys returns.
+- The after-<CR> screen, measured against native cell by cell (PTY job +
+  RPC probes, tests/drivers not in the offline suite): native's report
+  threshold is the *substitution count*, not the line count (3 subs on 1
+  line reports at report=2); the report must be a history message or the
+  next redraw repaints the leftover cmdline over it; and below the
+  threshold the row must show the *typed* :s line — the run() repaints it,
+  or the swapped :%S would sit there. With those three, every stage
+  (pattern, replacement, /g, <Esc>, <CR> reported and quiet) renders
+  identically to native.
 
 ## 2026-07-30 — :s stays :s on screen (the "enter" abbrev mode)
 
