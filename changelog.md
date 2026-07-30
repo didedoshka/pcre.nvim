@@ -3,6 +3,14 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## v0.1.8 — 2026-07-30
+
+- Live-preview pattern phase now matches native exactly (found on a visual
+  `:'<,'>s`, applied everywhere): only the matches that would be substituted
+  highlight — first per line without `/g`, `'gdefault'` respected — in
+  `hl-Substitute`, not every match in `Search`. The manual screen-parity
+  tier now also compares highlight shapes, the class screenstring can't see.
+
 ## v0.1.7 — 2026-07-30
 
 Battle-testing fixes for the "enter" mode, all verified screen-vs-screen

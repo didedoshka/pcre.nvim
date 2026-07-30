@@ -141,6 +141,49 @@ t("a below-'report' accept keeps the typed :s line on screen, like native", func
     eq(dumps.pcre, dumps.native)
 end)
 
+-- attr segmentation: each distinct screenattr id becomes a letter in order of
+-- first appearance per row, so highlight SHAPES compare across instances even
+-- though attr ids don't. screenstring alone missed a real bug here: the
+-- pattern phase highlighted every match where native only highlights the
+-- would-be-substituted ones.
+local grab_attrs = [[
+    vim.cmd("redraw")
+    local out = {}
+    for row = 1, 3 do
+        local map, nextc, s = {}, string.byte("a"), {}
+        for col = 1, 40 do
+            local id = vim.fn.screenattr(row, col)
+            if not map[id] then
+                map[id] = string.char(nextc)
+                nextc = nextc + 1
+            end
+            s[#s + 1] = map[id]
+        end
+        out[#out + 1] = table.concat(s)
+    end
+    return table.concat(out, "\n")
+]]
+
+t("highlight shapes during the pattern phase match native (incl. visual range)", function()
+    local dumps = {}
+    for _, mode in ipairs({ "native", "pcre" }) do
+        local s = start(mode)
+        local d = {}
+        keys(s, ":%s/foo")
+        d.percent = lua_in(s, grab_attrs)
+        vim.fn.chansend(s.job, "\27")
+        vim.wait(300)
+        keys(s, "Vj:s/foo")
+        d.visual = lua_in(s, grab_attrs)
+        vim.fn.chansend(s.job, "\27")
+        vim.wait(300)
+        stop(s)
+        dumps[mode] = d
+    end
+    eq(dumps.pcre.percent, dumps.native.percent, "percent-range pattern phase")
+    eq(dumps.pcre.visual, dumps.native.visual, "visual-range pattern phase")
+end)
+
 os.remove(inner_path)
 if failed > 0 then
     print(("%d screen-parity check(s) FAILED"):format(failed))

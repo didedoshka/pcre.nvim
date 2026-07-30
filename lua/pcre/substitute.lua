@@ -336,12 +336,14 @@ function M.live_preview(line)
         l2 = l1
     end
     if sep_count(rest) < 2 then
-        -- pattern phase: matches highlight, nothing is replaced yet
-        local lines = vim.api.nvim_buf_get_lines(buf, l1 - 1, l2, false)
-        for _, m in ipairs(pcre2.find(lines, spec.pat) or {}) do
-            if m.ecol > m.scol then
-                vim.api.nvim_buf_set_extmark(buf, ns_live, l1 - 1 + m.lnum - 1, m.scol,
-                    { end_col = m.ecol, hl_group = "Search" })
+        -- pattern phase: native highlights the matches that WOULD be
+        -- substituted -- first per line without /g -- with hl-Substitute
+        -- (measured by cell color, the group disambiguated from Search)
+        local edits = M.compute(buf, l1, l2, spec)
+        for _, e in ipairs(edits or {}) do
+            if e.ecol > e.scol then
+                vim.api.nvim_buf_set_extmark(buf, ns_live, e.lnum - 1, e.scol,
+                    { end_col = e.ecol, hl_group = "Substitute" })
             end
         end
     else

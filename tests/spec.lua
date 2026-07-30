@@ -1074,10 +1074,11 @@ t("s-rewrite 'enter' mode: live pcre preview via extmarks, buffer untouched", fu
     })
     vim.fn.feedkeys(":%s/fo(?=o)/XY/g\r", "tx")
     vim.api.nvim_del_autocmd(au)
-    -- pattern phase: matches highlighted, nothing replaced, native parked
+    -- pattern phase: only the would-be-substituted match highlights (first
+    -- per line, like native), nothing replaced, native preview parked
     local pat = snaps["%s/fo(?=o)"]
-    eq(#pat.marks, 2)
-    eq(pat.marks[1][4].hl_group, "Search")
+    eq(#pat.marks, 1)
+    eq(pat.marks[1][4].hl_group, "Substitute")
     eq(pat.incc, "")
     -- replacement phase: conceal over each match, expansion as inline
     -- virt_text; without /g only the first match of the line previews

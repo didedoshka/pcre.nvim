@@ -29,9 +29,16 @@ replace a builtin command's preview. Reimplementation candidates, measured:
   the suite. Unparked at CmdlineLeave (pcall + scheduled retry). While
   parked, live_preview covers a directly typed :S too, since the official
   :S preview can't run.
-- Approximation, declared: the pattern-phase highlight group is `Search`
-  (native's exact group unverified — cosmetic); `inccommand=split`'s preview
-  window is not reproduced, matches on screen are the preview.
+- Pattern phase, measured (battle-testing found the deviation on a visual
+  range): native highlights only the matches that WOULD be substituted —
+  first per line without /g — not every match, and the group is
+  `hl-Substitute`, disambiguated from Search by giving it a unique color and
+  reading the cell with nvim__inspect_cell (they share colors in the default
+  scheme). So the pattern phase renders compute()'s edits, not find()'s
+  matches. screenstring-based parity misses this class entirely; the manual
+  tier compares screenattr *shapes* (per-row first-appearance letters) too.
+- `inccommand=split`'s preview window is not reproduced; matches on screen
+  are the preview.
 - Measured trap (tests): feedkeys("x") force-closes a drained cmdline like
   <Esc>, so mid-session state must be asserted from a CmdlineChanged
   autocmd registered after the plugin's, never after feedkeys returns.
