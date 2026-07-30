@@ -3,11 +3,12 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
-## v0.2.0 — 2026-07-30
+## v0.1.1 — 2026-07-30
 
-The whole native search surface, in PCRE — one release for one day of
-development (the intermediate v0.1.1–v0.1.8 tags were never published and
-are collapsed here).
+The native search surface in PCRE, one release for one day of development
+(eight working tags, never published, collapsed into this one). Parity is
+not complete yet — search offsets, the remaining :s flags (`n`, `e`, `I`,
+the `&`/`g&` repeat family) and multi-line patterns stay open.
 
 - Star family: `search_cword({ backward?, exact? })` searches the word under
   the cursor as `\bword\b` (boundaries only where the edge is a PCRE2 word

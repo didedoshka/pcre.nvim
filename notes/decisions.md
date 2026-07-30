@@ -8,8 +8,9 @@ Shipped behaviour belongs in the readme, not here.
 
 Eight tags landed in one day (v0.1.1–v0.1.8), one per fix-and-verify cycle —
 commit markers, not versions. Nobody could have installed them: no remote,
-never published. Collapsed into v0.2.0 (tags deleted locally, commits
-untouched; the changelog sections merged). The rule going forward: while
+never published. Collapsed into a single v0.1.1 (tags deleted locally,
+commits untouched; the changelog sections merged) — a z-bump, since nothing
+breaks an existing setup, and parity is not complete enough for a v0.2.0. The rule going forward: while
 unpublished, tag once per coherent milestone — a day's worth of work at
 most — and after publication, tag only what users should update to.
 
