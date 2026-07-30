@@ -11,8 +11,10 @@ being prepared for publication.
   verified behaviorally by the suite.
 - `lua/pcre/search.lua` — the `/` prompt, highlights, `n`/`N`, ownership.
 - `lua/pcre/substitute.lua` — `:S`, 'inccommand' preview, the `:s` rewrite.
-- `tests/` — offline suite + `bench.lua`. `notes/decisions.md` — dated log of
-  non-obvious choices and measured traps; append an entry for each new one.
+- `tests/` — offline suite + `bench.lua`, plus the manual tier
+  `screen_parity.lua` (PTY-driven real UI vs native, ~40 s — see Verify).
+  `notes/decisions.md` — dated log of non-obvious choices and measured
+  traps; append an entry for each new one.
 - `changelog.md` — user-facing history, SemVer 0.x: breaking bumps minor,
   everything else bumps patch; `1.0.0` when battle-tested. Keep it current
   with behaviour changes; tag releases `vX.Y.Z` (annotated).
@@ -33,6 +35,12 @@ being prepared for publication.
   from repo root or `.luarc.json` isn't found; baseline zero problems) + the
   headless suite under `nvim -l`. lua-ls does not catch cross-module
   breakage; only the suite does.
+- `nvim --headless --clean -l tests/screen_parity.lua` after anything
+  touching the cmdline, previews or messages: drives real interactive nvims
+  in a PTY and compares screens against native. Headless cannot see this
+  class of bug — cmdpreview never engages there (the E474 regression), and
+  message retention only shows on a real screen. ~40 s, needs a PTY; not in
+  run.sh or the edit hook.
 - Commit each verified change without asking (`area: lowercase summary`,
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`). Never rewrite
   history — no amend, rebase, or reset past a commit; fix forward.
