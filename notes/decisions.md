@@ -4,6 +4,15 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-07-30 — versions mark releases, not working sessions
+
+Eight tags landed in one day (v0.1.1–v0.1.8), one per fix-and-verify cycle —
+commit markers, not versions. Nobody could have installed them: no remote,
+never published. Collapsed into v0.2.0 (tags deleted locally, commits
+untouched; the changelog sections merged). The rule going forward: while
+unpublished, tag once per coherent milestone — a day's worth of work at
+most — and after publication, tag only what users should update to.
+
 ## 2026-07-30 — live preview for the typed :s: extmarks, never buffer edits
 
 The "enter" mode needed its own 'inccommand': while the line says `:s`, the

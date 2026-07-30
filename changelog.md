@@ -3,109 +3,40 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
-## v0.1.8 — 2026-07-30
+## v0.2.0 — 2026-07-30
 
-- Live-preview pattern phase now matches native exactly (found on a visual
-  `:'<,'>s`, applied everywhere): only the matches that would be substituted
-  highlight — first per line without `/g`, `'gdefault'` respected — in
-  `hl-Substitute`, not every match in `Search`. The manual screen-parity
-  tier now also compares highlight shapes, the class screenstring can't see.
-
-## v0.1.7 — 2026-07-30
-
-Battle-testing fixes for the "enter" mode, all verified screen-vs-screen
-against native in a driven real UI:
-
-- E474 crash typing `:s/` fixed: 'inccommand' now parks at CmdlineEnter —
-  once the native preview engages (a bare `:s` is already previewable when
-  a previous substitute exists), the option refuses writes. A directly
-  typed `:S` is covered by the live preview while parked.
-- The after-`<CR>` row matches native: the report message survives redraws,
-  its threshold is the substitution count (not lines), and below it the
-  typed `:s` line is repainted where the swapped `:%S` used to linger.
-
-## v0.1.6 — 2026-07-30
-
-- The "enter" abbrev mode now has a live PCRE preview while the `:s` is being
-  typed — the missing half of v0.1.5. The buffer is never edited: matches
-  conceal under inline virt_text carrying their expansion (drawn exactly like
-  the real replacement — PTY-verified), so undo, marks and 'modified' cannot
-  be affected. Pattern phase highlights matches; the replacement phase
-  respects `/g`, `/i`, `'gdefault'` and `:s//`. Native `'inccommand'` is
-  parked for the session and restored on leave. `inccommand=split`'s extra
-  preview window is not reproduced (nosplit-style only).
-
-## v0.1.5 — 2026-07-30
-
-- `substitute_abbrev = "enter"`: the typed `:s` swaps to `:S` only at `<CR>`,
-  inside CmdlineLeave — the cmdline never shows the rewrite and the `:`
-  history keeps exactly what was typed. The trade: while typing, the
-  `'inccommand'` preview is the native engine's reading of the pattern.
-  `substitute_abbrev = true` keeps the visible swap and the true pcre
-  preview.
-
-## v0.1.4 — 2026-07-30
-
-The remaining native search contexts, all PCRE now — multi-line patterns
-stay the one scope cut:
-
-- `?`, the backward prompt: `search({ backward = true })`. Counts, n/N
-  direction, `<C-g>`/`<C-t>` (cycling backward, like native), the W [x/y]
-  echo — everything mirrored.
-- Visual `/` and `?` extend the selection to the match, live while typing.
-- Operator-pending `/` and `?`: `d/pat<CR>` is an exclusive motion, native
-  semantics in both directions.
-- `gn`/`gN` (`select_match({ backward? })`): select the covering match, else
-  the next in the search direction; in visual mode extend to the match edge;
-  `cgn` + `.` walks successive matches exactly like native. Falls through to
-  native gn/gN when no pcre search is owned.
-- Visual `*`/`#` (`search_selection({ backward? })`): literal search for the
-  selection, like nvim's default v_*, pcre-escaped; a multi-line selection
-  is refused.
-
-## v0.1.3 — 2026-07-30
-
-Native-parity batch — every behaviour measured against nvim first:
-
-- Backward searches set the direction: after `#`, `n` continues backward and
-  `N` forward, the echo shows `?pat`, and `v:searchforward` mirrors it.
-- `[count]/pat`, `[count]n` and `[count]*` work.
-- `<C-g>`/`<C-t>` cycle the current match while typing (`'incsearch'`);
-  accepting lands on the cycled match.
-- While typing, the current match highlights as IncSearch, and with
-  `'nohlsearch'` only the current match is painted — like native.
-- A wrapped search echoes a right-aligned `W [x/y]` instead of the warning
-  line; the `'shortmess'` S and s flags are respected; the SearchWrapped
-  autocmd fires.
-- `<C-r><C-l>` inserts the line under the cursor into the pattern.
-- `:S` handles the search state like `:s`: `@/` is set (even when nothing
-  matched), highlights relight, `n`/`N` repeat the pattern, the search
-  history stays untouched. The cursor ends on the first non-blank of the
-  last substituted line. `:S//x/` reuses the last pcre pattern, and
-  `'gdefault'` inverts `/g`.
-
-Known trap: nvim's default `<C-l>` clears native hlsearch through a `<Cmd>`
-mapping no Cmdline event can observe — chain `require("pcre").clear()` into
-your own `<C-l>` mapping if you use it.
-
-## v0.1.2 — 2026-07-30
-
-- Star family parity fix: native `*`/`#` search from the start of the word,
-  not from the cursor (measured — `*` on the whitespace before a word skips
-  that word, `#` from mid-word skips the current occurrence). `search_cword`
-  now does the same; only the regex syntax differs from native.
-
-## v0.1.1 — 2026-07-30
+The whole native search surface, in PCRE — one release for one day of
+development (the intermediate v0.1.1–v0.1.8 tags were never published and
+are collapsed here).
 
 - Star family: `search_cword({ backward?, exact? })` searches the word under
-  the cursor as a PCRE pattern (`\bword\b`; `exact = false` is the `g*`
-  flavour, no boundaries), so `*`/`#`/`g*`/`g#` can speak the same regex
-  syntax as `/` instead of handing `@/` to the native engine. `\b` is added
-  only where the word's edge is a PCRE2 word char, metacharacters are
-  escaped, and while `:Pcre`-toggled off the mapping falls through to the
-  native key.
-- `n`/`N` and the star family accept a count (`3n`), including the native
-  fallthrough.
+  the cursor as `\bword\b` (boundaries only where the edge is a PCRE2 word
+  char), jumping from the word start like native `*`/`#`; `g*`/`g#` skip the
+  boundaries.
+- Directions and counts everywhere: after `#` or `?`, `n` continues backward
+  and `N` forward (`v:searchforward` mirrored); `[count]/pat`, `[count]n`,
+  `[count]*` all work.
+- The prompt grew `?` (backward search), `<C-g>`/`<C-t>` match cycling,
+  IncSearch on the current match while typing (only it under 'nohlsearch'),
+  `<C-r><C-l>`, the native wrap echo (`W [x/y]`, 'shortmess' S/s matrix) and
+  the SearchWrapped autocmd.
+- Visual and operator-pending `/` and `?`: the prompt extends a selection
+  live, and the accepted jump is the operator's motion. `gn`/`gN` select the
+  match under or next to the cursor — `cgn` + `.` walks matches like native.
+  Visual `*`/`#` search the selection literally (multi-line refused).
+- `:S` handles the search state like `:s`: owns `@/` (even on no match),
+  relights highlights, leaves the search history alone, ends on the first
+  non-blank, reports by substitution count; `:S//x/` reuses the last pcre
+  pattern and `'gdefault'` inverts `/g`.
+- `substitute_abbrev = "enter"`: a typed `:s` looks native end to end — the
+  swap to `:S` happens invisibly at `<CR>`, the `:` history and the
+  after-run screen keep the typed line, and a live PCRE preview renders
+  while typing without ever touching the buffer (conceal + inline
+  virt_text; undo, marks and 'modified' untouched by construction). The
+  pattern phase highlights exactly the pending substitutions, like native.
+- Manual verify tier `tests/screen_parity.lua`: drives real interactive
+  nvims in a PTY and compares screens and highlight shapes against native,
+  cell by cell.
 
 ## v0.1.0 — 2026-07-26
 
