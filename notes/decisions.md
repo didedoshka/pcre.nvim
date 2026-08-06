@@ -4,6 +4,25 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-08-06 — the current match is an extmark, not coordinates
+
+`live.cur` was the match the search landed on, frozen as `{lnum, scol, ecol}`,
+and paint() drew `CurSearch` over that span unconditionally. Insert at the
+cursor right after a search and the highlight sat on the text being typed —
+the reported bug — or on whatever else landed there, matching or not.
+
+Measured against a real nvim (PTY, `nvim__inspect_cell` backgrounds), native
+after `/needle<CR>` then `i` + typing `needle`: the typed cells are plain
+`Search` and `CurSearch` is on the original match, pushed right. So the
+current match follows the text. An extmark with the default right gravity
+reproduces that exactly, and `CurSearch` is now painted only when the find
+still reports a match starting at the anchor.
+
+- Remaining divergence, deliberate: appending at the end of the line (`A`) drops
+  native's `CurSearch` entirely, though nothing touched the match. Ours keeps
+  it. `:h hl-CurSearch` says the highlight "may get outdated if changes are
+  made", so neither reading is wrong, and following the text is the useful one.
+
 ## 2026-08-06 — the prompt fires WinScrolled itself
 
 Measured in a PTY: typing `/getregion` scrolls the view either way, but native

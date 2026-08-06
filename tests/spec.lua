@@ -137,6 +137,45 @@ t("search: jumps to first match after cursor, highlights all, one CurSearch", fu
     })
 end)
 
+-- Typing the pattern itself at the cursor used to hand CurSearch to the text
+-- being typed: the current match was pinned to the coordinates the search
+-- landed on. Native pushes its CurSearch along with the text instead
+-- (measured against a real nvim), which is what the anchoring extmark does.
+t("search: typing the pattern at the cursor does not steal CurSearch", function()
+    local b = show({ "one foo two foo" }, { 1, 0 })
+    type_keys("foo<CR>")
+    ps.search()
+    eq(search_marks(b), {
+        { 0, 4, 7, "CurSearch" },
+        { 0, 12, 15, "Search" },
+    })
+    vim.api.nvim_buf_set_text(b, 0, 4, 0, 4, { "foo" }) -- "one foofoo two foo"
+    search.repaint()
+    eq(search_marks(b), {
+        { 0, 4, 7, "Search" }, -- what was just typed
+        { 0, 7, 10, "CurSearch" }, -- the match the search landed on, pushed right
+        { 0, 15, 18, "Search" },
+    })
+end)
+
+t("search: the current match follows an edit that changes its length", function()
+    local b = show({ "one foo two" }, { 1, 0 })
+    type_keys("fo+<CR>")
+    ps.search()
+    vim.api.nvim_buf_set_text(b, 0, 6, 0, 6, { "oo" }) -- "one foooo two"
+    search.repaint()
+    eq(search_marks(b), { { 0, 4, 9, "CurSearch" } })
+end)
+
+t("search: CurSearch goes away once nothing matches at the anchor", function()
+    local b = show({ "one foo two foo" }, { 1, 0 })
+    type_keys("foo<CR>")
+    ps.search()
+    vim.api.nvim_buf_set_text(b, 0, 4, 0, 5, { "" }) -- "one oo two foo"
+    search.repaint()
+    eq(search_marks(b), { { 0, 11, 14, "Search" } })
+end)
+
 t("search: strictly after -- cursor on a match start goes to the next one", function()
     show({ "foo foo" }, { 1, 0 })
     type_keys("foo<CR>")

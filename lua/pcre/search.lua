@@ -26,6 +26,38 @@ local forward = true ---@type boolean direction of the owned search (like v:sear
 local live = nil
 local painted = {} ---@type table<integer, integer[]> win -> matchaddpos ids
 
+-- The current match is anchored to an extmark, not to the coordinates it had
+-- when the search landed: native CurSearch follows the text through an edit
+-- (measured -- typing the pattern itself at the cursor leaves the highlight on
+-- the original match, pushed right, and paints the typed cells plain Search).
+-- Right gravity is what does that pushing, so the default is the one we want.
+local cur_ns = vim.api.nvim_create_namespace("pcre.cursearch")
+local cur_mark = nil ---@type integer? extmark id in live.buf
+
+---Replace the live search, re-anchoring the current match with it.
+---@param next_live table? the new live search, nil to drop everything
+local function set_live(next_live)
+    if cur_mark and live and vim.api.nvim_buf_is_valid(live.buf) then
+        vim.api.nvim_buf_del_extmark(live.buf, cur_ns, cur_mark)
+    end
+    cur_mark = nil
+    live = next_live
+    if live and live.cur and vim.api.nvim_buf_is_valid(live.buf) then
+        cur_mark = vim.api.nvim_buf_set_extmark(live.buf, cur_ns,
+            live.cur.lnum - 1, live.cur.scol, {})
+    end
+end
+
+---Where the current match sits now, or nil with no current match at all.
+---@return { lnum: integer, scol: integer }?
+local function cur_at()
+    if not (live and live.cur and cur_mark) then
+        return nil
+    end
+    local p = vim.api.nvim_buf_get_extmark_by_id(live.buf, cur_ns, cur_mark, {})
+    return p[1] and { lnum = p[1] + 1, scol = p[2] } or nil
+end
+
 local function unpaint(win)
     for _, id in ipairs(painted[win] or {}) do
         pcall(vim.fn.matchdelete, id, win)
@@ -42,7 +74,7 @@ local function paint(win)
     local top, bot = vim.fn.line("w0", win), vim.fn.line("w$", win)
     local lines = vim.api.nvim_buf_get_lines(live.buf, top - 1, bot, false)
     local matches = pcre2.find(lines, live.pattern) or {}
-    local cur = live.cur
+    local cur = cur_at()
     local ids, pos = {}, {}
     local function flush(group, prio)
         if #pos > 0 then
@@ -50,21 +82,28 @@ local function paint(win)
             pos = {}
         end
     end
-    if not (live.prompt and not vim.o.hlsearch) then
-        for _, m in ipairs(matches) do
-            local lnum = top + m.lnum - 1
-            if not (cur and lnum == cur.lnum and m.scol == cur.scol) then
-                -- zero-width matches get one visible cell, like native hlsearch
-                pos[#pos + 1] = { lnum, m.scol + 1, math.max(m.ecol - m.scol, 1) }
-                if #pos == 8 then -- matchaddpos takes at most 8 positions per call
-                    flush("Search", 10)
-                end
+    -- 'incsearch' without 'hlsearch' shows the current match alone, like native
+    local others = not (live.prompt and not vim.o.hlsearch)
+    local cur_pos = nil
+    for _, m in ipairs(matches) do
+        local lnum = top + m.lnum - 1
+        -- zero-width matches get one visible cell, like native hlsearch
+        local item = { lnum, m.scol + 1, math.max(m.ecol - m.scol, 1) }
+        if cur and lnum == cur.lnum and m.scol == cur.scol then
+            -- the anchored match, sized by this find (an edit inside it
+            -- changes its length); with nothing matching at the anchor any
+            -- more, no match is current and nothing wears CurSearch
+            cur_pos = item
+        elseif others then
+            pos[#pos + 1] = item
+            if #pos == 8 then -- matchaddpos takes at most 8 positions per call
+                flush("Search", 10)
             end
         end
-        flush("Search", 10)
     end
-    if cur and cur.lnum >= top and cur.lnum <= bot then
-        pos = { { cur.lnum, cur.scol + 1, math.max(cur.ecol - cur.scol, 1) } }
+    flush("Search", 10)
+    if cur_pos then
+        pos = { cur_pos }
         flush(live.prompt and "IncSearch" or "CurSearch", 11)
     end
     painted[win] = ids
@@ -138,7 +177,7 @@ end
 
 ---Clear search highlights everywhere (the :noh hook and manual use).
 function M.clear()
-    live = nil
+    set_live(nil)
     for win in pairs(painted) do
         unpaint(win)
     end
@@ -256,9 +295,9 @@ function M.search(opts)
             vim.fn.winrestview(view)
         end
         -- empty pattern shows whatever was on screen before, like native
-        live = pattern ~= ""
+        set_live(pattern ~= ""
             and { buf = buf, pattern = pattern, cur = matches[cur], prompt = true }
-            or prev_live
+            or prev_live)
         M.repaint()
         notify_scroll()
         vim.cmd("redraw") -- paint under the open cmdline, like native incsearch
@@ -282,7 +321,7 @@ function M.search(opts)
         cur = idx
         cycled = true
         vim.api.nvim_win_set_cursor(win, { matches[cur].lnum, matches[cur].scol })
-        live = { buf = buf, pattern = vim.fn.getcmdline(), cur = matches[cur], prompt = true }
+        set_live({ buf = buf, pattern = vim.fn.getcmdline(), cur = matches[cur], prompt = true })
         M.repaint()
         notify_scroll()
         vim.cmd("redraw")
@@ -291,7 +330,7 @@ function M.search(opts)
     ---@param keep_live boolean put the pre-prompt highlights back (plain
     ---cancel) or drop everything (failed search: nothing matches anyway)
     local function cancel(keep_live)
-        live = keep_live and prev_live or nil
+        set_live(keep_live and prev_live or nil)
         M.repaint()
         vim.fn.winrestview(view)
         notify_scroll()
@@ -437,7 +476,7 @@ function M.search(opts)
     local m = matches[cur]
     vim.fn.winrestview(view) -- jump from the origin, so m' lands there
     jump(win, m)
-    live = vim.o.hlsearch and { buf = buf, pattern = pattern, cur = m } or nil
+    set_live(vim.o.hlsearch and { buf = buf, pattern = pattern, cur = m } or nil)
     M.repaint()
     if wrapped then
         vim.api.nvim_exec_autocmds("SearchWrapped", {})
@@ -470,11 +509,7 @@ local function goto_nearest(pat, backward, count, from)
         lnum, col = matches[idx].lnum, matches[idx].scol
     end
     jump(win, matches[idx])
-    if vim.o.hlsearch then
-        live = { buf = buf, pattern = pat, cur = matches[idx] }
-    else
-        live = nil
-    end
+    set_live(vim.o.hlsearch and { buf = buf, pattern = pat, cur = matches[idx] } or nil)
     M.repaint()
     if wrapped then
         vim.api.nvim_exec_autocmds("SearchWrapped", {})
@@ -689,7 +724,7 @@ function M.select_match(opts)
         vim.cmd("normal! v")
         vim.api.nvim_win_set_cursor(win, { m.lnum, tail })
     end
-    live = vim.o.hlsearch and { buf = buf, pattern = pat, cur = matches[idx] } or nil
+    set_live(vim.o.hlsearch and { buf = buf, pattern = pat, cur = matches[idx] } or nil)
     M.repaint()
 end
 
@@ -722,8 +757,8 @@ end
 ---relight, n/N repeat it forward, nothing lands in the search history.
 function M.adopt(pattern)
     own(pattern)
-    live = vim.o.hlsearch
-        and { buf = vim.api.nvim_get_current_buf(), pattern = pattern } or nil
+    set_live(vim.o.hlsearch
+        and { buf = vim.api.nvim_get_current_buf(), pattern = pattern } or nil)
     M.repaint()
 end
 

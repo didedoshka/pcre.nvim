@@ -5,6 +5,12 @@ Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 
 ## Unreleased
 
+- The current match keeps its `CurSearch` highlight on the text it started on
+  when the buffer is edited, instead of on the coordinates it had when the
+  search landed. Typing the pattern at the cursor right after a search used to
+  paint `CurSearch` over the characters being typed; any other insert there
+  painted it over text that matched nothing at all.
+
 - The prompt fires `WinScrolled` when incremental search moves the view, like
   native incsearch does. Everything that redraws per viewport — LSP semantic
   tokens above all, whose range request hangs off that event — used to leave
