@@ -184,6 +184,30 @@ t("search: cancelling restores the scroll position, not just the cursor", functi
     eq({ after.lnum, after.col, after.topline }, { before.lnum, before.col, before.topline })
 end)
 
+-- Native incsearch scrolling fires WinScrolled per keystroke; nvim fires none
+-- from inside vim.fn.input(), so a viewport-driven consumer (LSP semantic
+-- tokens ask per visible range) stayed blank on the scrolled-in lines until
+-- <CR>. The prompt fires the event itself now -- while typing and on cancel.
+t("search: a scroll while typing fires WinScrolled, like native incsearch", function()
+    local lines = {}
+    for i = 1, 300 do
+        lines[i] = "line " .. i
+    end
+    lines[290] = "scrollevent"
+    show(lines, { 1, 0 })
+    local n = 0
+    local group = vim.api.nvim_create_augroup("pcre.spec.scroll", { clear = true })
+    vim.api.nvim_create_autocmd("WinScrolled", {
+        group = group,
+        callback = function() n = n + 1 end,
+    })
+    type_keys("scrollevent<Esc>")
+    ps.search()
+    vim.api.nvim_del_augroup_by_id(group)
+    -- one for the jump to line 290, one for the restore on <Esc>
+    assert(n >= 2, "WinScrolled fired " .. n .. " times, want at least 2")
+end)
+
 t("n: a zero-width match does not trap the cursor", function()
     show({ "abcabc" }, { 1, 0 })
     type_keys("(?=b)<CR>")

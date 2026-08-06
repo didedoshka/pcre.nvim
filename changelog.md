@@ -3,6 +3,13 @@
 Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 `y`, everything else bumps `z`. `1.0.0` will mark the API as stable.
 
+## Unreleased
+
+- The prompt fires `WinScrolled` when incremental search moves the view, like
+  native incsearch does. Everything that redraws per viewport — LSP semantic
+  tokens above all, whose range request hangs off that event — used to leave
+  the scrolled-in lines unhighlighted until `<CR>`.
+
 ## v0.1.1 — 2026-07-30
 
 The native search surface in PCRE, one release for one day of development

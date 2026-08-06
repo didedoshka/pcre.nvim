@@ -219,6 +219,27 @@ function M.search(opts)
     local hlsearch = vim.v.hlsearch -- native highlights, hidden while we type
     local prev_live = live -- what was painted before the prompt, for cancel
 
+    -- Native incsearch scrolls from inside the cmdline loop and WinScrolled
+    -- still fires per keystroke; inside vim.fn.input() nvim fires none
+    -- (measured: 3 events natively while typing, 0 here). Everything that
+    -- redraws per viewport misses the scrolled-in lines until <CR> -- LSP
+    -- semantic tokens above all: their range request hangs off WinScrolled.
+    -- So fire it ourselves whenever the prompt moves the view. v:event stays
+    -- empty (nvim_exec_autocmds cannot fill it) and a consumer that trips over
+    -- that must not take the prompt down with it, hence the pcall.
+    local function view_key()
+        local v = vim.fn.winsaveview()
+        return v.topline .. ":" .. v.leftcol
+    end
+    local view_at = view_key()
+    local function notify_scroll()
+        local now = view_key()
+        if now ~= view_at then
+            view_at = now
+            pcall(vim.api.nvim_exec_autocmds, "WinScrolled", { pattern = tostring(win) })
+        end
+    end
+
     local function update(pattern)
         matches = pattern ~= "" and M.find(buf, pattern) or {}
         -- a regex error mid-typing (unclosed group etc.) just means no matches yet
@@ -239,6 +260,7 @@ function M.search(opts)
             and { buf = buf, pattern = pattern, cur = matches[cur], prompt = true }
             or prev_live
         M.repaint()
+        notify_scroll()
         vim.cmd("redraw") -- paint under the open cmdline, like native incsearch
     end
 
@@ -262,6 +284,7 @@ function M.search(opts)
         vim.api.nvim_win_set_cursor(win, { matches[cur].lnum, matches[cur].scol })
         live = { buf = buf, pattern = vim.fn.getcmdline(), cur = matches[cur], prompt = true }
         M.repaint()
+        notify_scroll()
         vim.cmd("redraw")
     end
 
@@ -271,6 +294,7 @@ function M.search(opts)
         live = keep_live and prev_live or nil
         M.repaint()
         vim.fn.winrestview(view)
+        notify_scroll()
         vim.v.hlsearch = hlsearch
         echo({})
     end
