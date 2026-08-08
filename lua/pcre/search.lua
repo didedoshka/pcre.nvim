@@ -37,6 +37,14 @@ local cur_mark = nil ---@type integer? extmark id in live.buf
 ---Replace the live search, re-anchoring the current match with it.
 ---@param next_live table? the new live search, nil to drop everything
 local function set_live(next_live)
+    -- restoring the search that is already live (the prompt's empty-pattern
+    -- and cancel paths): keep its mark -- the mark tracked edits, while
+    -- live.cur still holds the coordinates the match had when the search
+    -- landed, which an edit can push out of range (nvim_buf_set_extmark
+    -- E5108, measured)
+    if next_live ~= nil and next_live == live then
+        return
+    end
     if cur_mark and live and vim.api.nvim_buf_is_valid(live.buf) then
         vim.api.nvim_buf_del_extmark(live.buf, cur_ns, cur_mark)
     end

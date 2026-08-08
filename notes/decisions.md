@@ -4,6 +4,18 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-08-08 — restoring the live search keeps its mark
+
+Measured trap in the extmark anchoring above: `set_live` re-anchored from
+`live.cur`, the coordinates the match had when the search landed. The prompt's
+empty-pattern and cancel paths restore the search that is *already* live, and
+once an edit had pushed those coordinates out of range the restore crashed
+(`nvim_buf_set_extmark` E5108) — taking the prompt down and leaving the stale
+state in place, so every later `/` crashed the same way. A same-table restore
+now returns early and keeps the existing mark: it is the one that tracked the
+edits, and re-creating it from the frozen coordinates was wrong even when it
+didn't crash.
+
 ## 2026-08-06 — the current match is an extmark, not coordinates
 
 `live.cur` was the match the search landed on, frozen as `{lnum, scol, ecol}`,

@@ -109,6 +109,18 @@ t("search: a failed search still owns n/N", function()
     eq(cursor(), { 2, 2 })
 end)
 
+t("search: the prompt opens after an edit pushed the old match out of range", function()
+    show({ "alpha needle tail" }, { 1, 0 })
+    type_keys("needle<CR>")
+    ps.search()
+    -- the accepted match's recorded coordinates no longer exist; opening the
+    -- prompt restores that live search before any typing (E5108 regression)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a" })
+    type_keys("<Esc>")
+    ps.search()
+    eq(cursor(), { 1, 0 })
+end)
+
 t("search: <Down> comes back to the pattern <Up> stashed", function()
     vim.fn.histadd("search", "alpha")
     show({ "x beta" }, { 1, 0 })
