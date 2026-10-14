@@ -41,8 +41,7 @@ being prepared for publication.
   class of bug — cmdpreview never engages there (the E474 regression), and
   message retention only shows on a real screen. ~40 s, needs a PTY; not in
   run.sh or the edit hook.
-- Commit each verified change without asking (`area: lowercase summary`,
-  `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`). Never rewrite
+- Commit each verified change without asking (`area: lowercase summary`). Never rewrite
   history — no amend, rebase, or reset past a commit; fix forward.
 - **`readme.md` is the user's.** They write it themselves — never draft,
   edit, or "improve" it. After a behaviour change, list which readme
