@@ -4,6 +4,21 @@ Dated log of the non-obvious choices and what forced them. Measured traps live
 here too — "measured" means verified in this repo, not recalled from docs.
 Shipped behaviour belongs in the readme, not here.
 
+## 2026-10-14 — WinScrolled is fired scheduled, not from CmdlineChanged
+
+Measured trap in the entry below: fired inline from the `CmdlineChanged`
+callback, the `WinScrolled` handlers do not see an empty `v:event`. They see
+the enclosing `CmdlineChanged` one, `{cmdlevel = 1, cmdtype = "@"}`, and a
+handler that reads it the native way (window id -> deltas) indexes a number.
+arc.nvim's diff highlighting crashed exactly like that. `nvim_exec_autocmds`
+cannot set `v:event`, and it reports a handler's error itself instead of
+raising it, so the `pcall` around it never caught anything.
+
+`vim.schedule` gets the call out of the autocmd. Measured in a PTY, the
+scheduled callback still runs while `input()` waits for the next key, with
+`v:event` empty, so consumers keep seeing the scroll per keystroke. A
+`redraw` after it paints what they drew under the open cmdline.
+
 ## 2026-08-08 — restoring the live search keeps its mark
 
 Measured trap in the extmark anchoring above: `set_live` re-anchored from
@@ -47,9 +62,6 @@ that event (`vim/lsp/semantic_tokens.lua`, 200 ms debounce).
 - `nvim_exec_autocmds("WinScrolled", { pattern = tostring(win) })` reaches all
   three flavours of registration — plain, buffer-local (what semantic tokens
   uses) and win-id pattern. Passing `buffer =` instead misses the win-id one.
-- Measured trap: `v:event` stays an empty dict, `data` does not fill it. A
-  consumer reading `v:event.all.topline` errors, so the call is pcall'd — an
-  error must not take the prompt down.
 - The async half works: a reply arriving 200 ms later, while `input()` is
   still blocked, redraws through `nvim__redraw` and lands on the screen
   (verified with a fake range-highlighter over the real prompt).

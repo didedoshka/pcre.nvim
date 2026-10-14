@@ -5,6 +5,11 @@ Versions follow SemVer, pre-1.0 flavour: while `0.y.z`, a breaking change bumps
 
 ## Unreleased
 
+- `WinScrolled` handlers no longer crash while the prompt is typed. The event
+  used to reach them with the cmdline's `v:event` (`cmdlevel`, `cmdtype`)
+  in place of the window deltas, and any handler reading it as window ids
+  errored on every scroll.
+
 - The current match keeps its `CurSearch` highlight on the text it started on
   when the buffer is edited, instead of on the coordinates it had when the
   search landed. Typing the pattern at the cursor right after a search used to

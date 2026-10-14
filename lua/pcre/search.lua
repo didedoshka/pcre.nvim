@@ -271,9 +271,14 @@ function M.search(opts)
     -- (measured: 3 events natively while typing, 0 here). Everything that
     -- redraws per viewport misses the scrolled-in lines until <CR> -- LSP
     -- semantic tokens above all: their range request hangs off WinScrolled.
-    -- So fire it ourselves whenever the prompt moves the view. v:event stays
-    -- empty (nvim_exec_autocmds cannot fill it) and a consumer that trips over
-    -- that must not take the prompt down with it, hence the pcall.
+    -- So fire it ourselves whenever the prompt moves the view. Scheduled, not
+    -- inline: fired from the CmdlineChanged callback, the handlers saw that
+    -- event's v:event ({cmdlevel, cmdtype}) and read it as window ids, which
+    -- crashed arc.nvim's (measured; nvim_exec_autocmds cannot set v:event and
+    -- reports a handler's error itself, so a pcall around it caught nothing).
+    -- The scheduled call still runs while input() waits for the next key, with
+    -- v:event empty (measured in a PTY); the redraw paints what the handlers
+    -- drew under the open cmdline, as the inline call's trailing redraw did.
     local function view_key()
         local v = vim.fn.winsaveview()
         return v.topline .. ":" .. v.leftcol
@@ -283,7 +288,12 @@ function M.search(opts)
         local now = view_key()
         if now ~= view_at then
             view_at = now
-            pcall(vim.api.nvim_exec_autocmds, "WinScrolled", { pattern = tostring(win) })
+            vim.schedule(function()
+                if vim.api.nvim_win_is_valid(win) then
+                    vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(win) })
+                    vim.cmd("redraw")
+                end
+            end)
         end
     end
 

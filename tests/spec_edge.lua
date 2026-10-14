@@ -208,16 +208,26 @@ t("search: a scroll while typing fires WinScrolled, like native incsearch", func
     lines[290] = "scrollevent"
     show(lines, { 1, 0 })
     local n = 0
+    local events = {}
     local group = vim.api.nvim_create_augroup("pcre.spec.scroll", { clear = true })
     vim.api.nvim_create_autocmd("WinScrolled", {
         group = group,
-        callback = function() n = n + 1 end,
+        callback = function()
+            n = n + 1
+            events[#events + 1] = vim.v.event
+        end,
     })
     type_keys("scrollevent<Esc>")
     ps.search()
-    vim.api.nvim_del_augroup_by_id(group)
     -- one for the jump to line 290, one for the restore on <Esc>
+    vim.wait(100, function() return n >= 2 end)
+    vim.api.nvim_del_augroup_by_id(group)
     assert(n >= 2, "WinScrolled fired " .. n .. " times, want at least 2")
+    -- fired inline from CmdlineChanged, the handlers got its {cmdlevel, cmdtype}
+    -- as v:event and crashed reading it as window ids (arc.nvim did)
+    for _, ev in ipairs(events) do
+        eq(ev, vim.empty_dict())
+    end
 end)
 
 t("n: a zero-width match does not trap the cursor", function()
