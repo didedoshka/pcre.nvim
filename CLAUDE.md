@@ -46,8 +46,6 @@ being prepared for publication.
 - **`readme.md` is the user's.** They write it themselves — never draft,
   edit, or "improve" it. After a behaviour change, list which readme
   sections went stale so they can update them.
-- No GitHub remote yet; never push, publish, or share without the user's
-  explicit go-ahead.
 
 ## Style
 
